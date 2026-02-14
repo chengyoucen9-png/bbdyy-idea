@@ -1,0 +1,3198 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>短视频内容生产系统 v3.2 - 多模型AI版</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // ==================== 持久化存储封装 ====================
+        const usePersistedState = (key, initialValue) => {
+            const [value, setValue] = useState(initialValue);
+            const [loading, setLoading] = useState(true);
+
+            // 初始化：从存储加载数据
+            useEffect(() => {
+                const loadData = async () => {
+                    try {
+                        const result = await window.storage.get(key, false);
+                        if (result && result.value) {
+                            setValue(JSON.parse(result.value));
+                        }
+                    } catch (error) {
+                        console.log('加载数据失败，使用初始值:', error);
+                    } finally {
+                        setLoading(false);
+                    }
+                };
+                loadData();
+            }, [key]);
+
+            // 保存：当值变化时保存到存储
+            useEffect(() => {
+                if (!loading) {
+                    const saveData = async () => {
+                        try {
+                            await window.storage.set(key, JSON.stringify(value), false);
+                        } catch (error) {
+                            console.error('保存数据失败:', error);
+                        }
+                    };
+                    saveData();
+                }
+            }, [key, value, loading]);
+
+            return [value, setValue, loading];
+        };
+
+        // ==================== 视频帧提取 ====================
+        const extractVideoFrame = (videoFile) => {
+            return new Promise((resolve, reject) => {
+                const video = document.createElement('video');
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                video.preload = 'metadata';
+                video.src = URL.createObjectURL(videoFile);
+                video.onloadeddata = () => {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    video.currentTime = 0.1;
+                };
+                video.onseeked = () => {
+                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    const thumbnail = canvas.toDataURL('image/jpeg', 0.7);
+                    URL.revokeObjectURL(video.src);
+                    resolve(thumbnail);
+                };
+                video.onerror = () => {
+                    URL.revokeObjectURL(video.src);
+                    reject(new Error('视频加载失败'));
+                };
+            });
+        };
+
+        // ==================== 图片转base64 ====================
+        const imageToBase64 = (imageFile) => {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => resolve(e.target.result.split(',')[1]);
+                reader.onerror = reject;
+                reader.readAsDataURL(imageFile);
+            });
+        };
+
+        // ==================== AI 分析图片 - 支持多模型 ====================
+        const analyzeImageWithAI = async (base64Image) => {
+            const provider = window.CURRENT_AI_PROVIDER;
+            if (!provider) {
+                throw new Error('请先在设置中配置并选择 AI 模型');
+            }
+
+            if (!provider.vision.enabled) {
+                throw new Error('当前模型未启用视觉功能，请配置或切换其他模型');
+            }
+
+            if (!provider.vision.apiKey) {
+                throw new Error('请先在设置中配置视觉模型的 API 密钥');
+            }
+
+            const config = provider.vision;
+
+            try {
+                let requestConfig;
+
+                // 根据不同的模型类型构建请求
+                if (provider.type === 'doubao') {
+                    requestConfig = {
+                        url: config.apiEndpoint,
+                        headers: {
+                            "Content-Type": "application/json",
+                            "Authorization": `Bearer ${config.apiKey}`
+                        },
+                        body: {
+                            model: config.model,
+                            messages: [{
+                                role: "user",
+                                content: [
+                                    {
+                                        type: "image_url",
+                                        image_url: { url: `data:image/jpeg;base64,${base64Image}` }
+                                    },
+                                    {
+                                        type: "text",
+                                        text: `分析这个素材，返回JSON格式：{"scene":"场景描述(20-30字)","tags":["标签1","标签2","标签3","标签4","标签5"],"usage":"使用建议(15-25字)","mood":"情绪氛围","suggestedName":"文件名"}。标签必须包含场景、内容、用途标签。只返回JSON，不要其他文字。`
+                                    }
+                                ]
+                            }]
+                        }
+                    };
+                } else if (provider.type === 'claude') {
+                    requestConfig = {
+                        url: config.apiEndpoint,
+                        headers: {
+                            "Content-Type": "application/json",
+                            "x-api-key": config.apiKey,
+                            "anthropic-version": "2023-06-01"
+                        },
+                        body: {
+                            model: config.model,
+                            max_tokens: 1000,
+                            messages: [{
+                                role: "user",
+                                content: [
+                                    {
+                                        type: "image",
+                                        source: {
+                                            type: "base64",
+                                            media_type: "image/jpeg",
+                                            data: base64Image
+                                        }
+                                    },
+                                    {
+                                        type: "text",
+                                        text: `分析这个素材，返回JSON格式：{"scene":"场景描述(20-30字)","tags":["标签1","标签2","标签3","标签4","标签5"],"usage":"使用建议(15-25字)","mood":"情绪氛围","suggestedName":"文件名"}。标签必须包含场景、内容、用途标签。只返回JSON，不要其他文字。`
+                                    }
+                                ]
+                            }]
+                        }
+                    };
+                } else {
+                    // 通用格式（OpenAI 兼容）
+                    requestConfig = {
+                        url: config.apiEndpoint,
+                        headers: {
+                            "Content-Type": "application/json",
+                            "Authorization": `Bearer ${config.apiKey}`
+                        },
+                        body: {
+                            model: config.model,
+                            messages: [{
+                                role: "user",
+                                content: [
+                                    {
+                                        type: "image_url",
+                                        image_url: { url: `data:image/jpeg;base64,${base64Image}` }
+                                    },
+                                    {
+                                        type: "text",
+                                        text: `分析这个素材，返回JSON格式：{"scene":"场景描述(20-30字)","tags":["标签1","标签2","标签3","标签4","标签5"],"usage":"使用建议(15-25字)","mood":"情绪氛围","suggestedName":"文件名"}。标签必须包含场景、内容、用途标签。只返回JSON，不要其他文字。`
+                                    }
+                                ]
+                            }]
+                        }
+                    };
+                }
+
+                const response = await fetch(requestConfig.url, {
+                    method: "POST",
+                    headers: requestConfig.headers,
+                    body: JSON.stringify(requestConfig.body)
+                });
+
+                const data = await response.json();
+                console.log('AI返回:', data);
+
+                if (data.error) {
+                    throw new Error(data.error.message || 'API调用失败');
+                }
+
+                // 根据不同模型解析响应
+                let text;
+                if (provider.type === 'claude') {
+                    text = data.content[0].text;
+                } else {
+                    text = data.choices[0].message.content;
+                }
+
+                text = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+                return JSON.parse(text);
+            } catch (error) {
+                console.error('AI分析失败:', error);
+                throw error;
+            }
+        };
+
+        // ==================== AI 检索函数 - 支持多模型 ====================
+        const searchMaterialsWithAI = async (idea, materials) => {
+            const provider = window.CURRENT_AI_PROVIDER;
+            if (!provider) {
+                throw new Error('请先在设置中配置并选择 AI 模型');
+            }
+
+            if (!provider.text.enabled) {
+                throw new Error('当前模型未启用文本功能，请配置或切换其他模型');
+            }
+
+            if (!provider.text.apiKey) {
+                throw new Error('请先在设置中配置文本模型的 API 密钥');
+            }
+
+            const config = provider.text;
+
+            const prompt = `你是短视频内容生产助手。用户有一个创作想法，你需要帮助他从素材库中找到合适的素材。
+
+用户想法：${idea}
+
+素材库数据（包含素材ID、名称、场景、标签、使用次数等信息）：
+${JSON.stringify(materials, null, 2)}
+
+请分析并用JSON格式回复（只返回JSON，不要其他文字）：
+{
+  "hasMatchingMaterials": true/false,
+  "matchedMaterials": [
+    {
+      "materialId": 素材ID（数字）,
+      "materialName": "素材名称",
+      "reason": "推荐理由（15-25字）",
+      "usage": "建议用途（如：适合做开头、适合做B-roll、适合做转场）"
+    }
+  ],
+  "missingMaterials": [
+    {
+      "type": "缺少的素材类型",
+      "suggestion": "拍摄建议（20-40字）"
+    }
+  ],
+  "topicSuggestions": [
+    {
+      "title": "选题标题",
+      "angle": "切入角度",
+      "reason": "为什么适合"
+    }
+  ]
+}
+
+注意事项：
+1. 如果素材库中有符合用户想法的素材，设置hasMatchingMaterials为true，并在matchedMaterials中推荐3-5个最合适的素材
+2. 即使有匹配的素材，也可以在missingMaterials中建议一些能让视频更好的补充素材（1-3个）
+3. topicSuggestions中给出3个具体选题建议
+4. materialId必须是素材库中真实存在的ID`;
+
+            try {
+                let requestConfig;
+
+                if (provider.type === 'doubao') {
+                    requestConfig = {
+                        url: config.apiEndpoint,
+                        headers: {
+                            "Content-Type": "application/json",
+                            "Authorization": `Bearer ${config.apiKey}`
+                        },
+                        body: {
+                            model: config.model,
+                            messages: [{ role: "user", content: prompt }]
+                        }
+                    };
+                } else if (provider.type === 'claude') {
+                    requestConfig = {
+                        url: config.apiEndpoint,
+                        headers: {
+                            "Content-Type": "application/json",
+                            "x-api-key": config.apiKey,
+                            "anthropic-version": "2023-06-01"
+                        },
+                        body: {
+                            model: config.model,
+                            max_tokens: 2000,
+                            messages: [{ role: "user", content: prompt }]
+                        }
+                    };
+                } else {
+                    requestConfig = {
+                        url: config.apiEndpoint,
+                        headers: {
+                            "Content-Type": "application/json",
+                            "Authorization": `Bearer ${config.apiKey}`
+                        },
+                        body: {
+                            model: config.model,
+                            messages: [{ role: "user", content: prompt }]
+                        }
+                    };
+                }
+
+                const response = await fetch(requestConfig.url, {
+                    method: "POST",
+                    headers: requestConfig.headers,
+                    body: JSON.stringify(requestConfig.body)
+                });
+
+                const data = await response.json();
+                console.log('AI返回:', data);
+
+                if (data.error) {
+                    throw new Error(data.error.message || 'API调用失败');
+                }
+
+                let jsonText;
+                if (provider.type === 'claude') {
+                    jsonText = data.content[0].text;
+                } else {
+                    jsonText = data.choices[0].message.content;
+                }
+
+                jsonText = jsonText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+                const result = JSON.parse(jsonText);
+                return result;
+            } catch (error) {
+                console.error('AI检索错误:', error);
+                throw error;
+            }
+        };
+
+        // ==================== 主应用组件 ====================
+        const ContentProductionApp = () => {
+            const [activeTab, setActiveTab] = useState('home');
+            const [materials, setMaterials, materialsLoading] = usePersistedState('materials_v2', []);
+            const [topics, setTopics, topicsLoading] = usePersistedState('topics_v2', []);
+            const [videos, setVideos, videosLoading] = usePersistedState('videos_v2', []);
+            
+            // 多模型配置
+            const [aiProviders, setAiProviders, providersLoading] = usePersistedState('ai_providers', []);
+            const [selectedProvider, setSelectedProvider, selectedLoading] = usePersistedState('selected_provider', null);
+
+            // 等待所有数据加载完成
+            if (materialsLoading || topicsLoading || videosLoading || providersLoading || selectedLoading) {
+                return (
+                    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50 flex items-center justify-center">
+                        <div className="text-center">
+                            <i className="fas fa-spinner fa-spin text-6xl text-indigo-600 mb-4"></i>
+                            <p className="text-xl text-gray-700">加载中...</p>
+                        </div>
+                    </div>
+                );
+            }
+
+            // 将当前选中的模型配置注入到全局
+            const currentProvider = aiProviders.find(p => p.id === selectedProvider);
+            window.CURRENT_AI_PROVIDER = currentProvider || null;
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50">
+                    {/* 顶部导航 */}
+                    <Header activeTab={activeTab} setActiveTab={setActiveTab} />
+
+                    {/* 主内容区 */}
+                    <main className="container mx-auto px-4 py-8">
+                        {activeTab === 'home' && (
+                            <AIHomePage 
+                                materials={materials} 
+                                setMaterials={setMaterials}
+                                topics={topics}
+                                setTopics={setTopics}
+                            />
+                        )}
+                        {activeTab === 'materials' && (
+                            <MaterialsManager materials={materials} setMaterials={setMaterials} />
+                        )}
+                        {activeTab === 'topics' && (
+                            <TopicsManager topics={topics} setTopics={setTopics} />
+                        )}
+                        {activeTab === 'videos' && (
+                            <VideosManager videos={videos} setVideos={setVideos} materials={materials} />
+                        )}
+                        {activeTab === 'analytics' && (
+                            <Analytics videos={videos} />
+                        )}
+                        {activeTab === 'settings' && (
+                            <SettingsPage 
+                                aiProviders={aiProviders} 
+                                setAiProviders={setAiProviders}
+                                selectedProvider={selectedProvider}
+                                setSelectedProvider={setSelectedProvider}
+                            />
+                        )}
+                    </main>
+
+                    {/* 底部信息 */}
+                    <Footer materials={materials} topics={topics} videos={videos} />
+                </div>
+            );
+        };
+
+        // ==================== 头部组件 ====================
+        const Header = ({ activeTab, setActiveTab }) => {
+            const tabs = [
+                { id: 'home', name: 'AI 首页', icon: 'fa-robot' },
+                { id: 'materials', name: '素材库', icon: 'fa-photo-film' },
+                { id: 'topics', name: '选题库', icon: 'fa-lightbulb' },
+                { id: 'videos', name: '成品库', icon: 'fa-video' },
+                { id: 'analytics', name: '数据分析', icon: 'fa-chart-line' },
+                { id: 'settings', name: '设置', icon: 'fa-cog' }
+            ];
+
+            return (
+                <header className="bg-white shadow-lg">
+                    <div className="container mx-auto px-4">
+                        <div className="flex items-center justify-between py-4">
+                            <div className="flex items-center space-x-3">
+                                <i className="fas fa-film text-3xl text-indigo-600"></i>
+                                <div>
+                                    <h1 className="text-2xl font-bold text-gray-800">短视频内容生产系统</h1>
+                                    <p className="text-sm text-gray-500">AI智能版 v3.2 (手动编辑支持) 🚀</p>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-4">
+                                <div className="flex flex-wrap gap-2">
+                                    {tabs.map(tab => (
+                                        <button
+                                            key={tab.id}
+                                            onClick={() => setActiveTab(tab.id)}
+                                            className={`px-3 py-2 rounded-lg font-medium transition-all text-sm ${
+                                                activeTab === tab.id
+                                                    ? 'bg-indigo-600 text-white shadow-md'
+                                                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                            }`}
+                                        >
+                                            <i className={`fas ${tab.icon} mr-1`}></i>
+                                            <span className="hidden sm:inline">{tab.name}</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </header>
+            );
+        };
+
+        // ==================== AI 智能首页 ====================
+        const AIHomePage = ({ materials, setMaterials, topics, setTopics }) => {
+            const [idea, setIdea] = useState('');
+            const [loading, setLoading] = useState(false);
+            const [result, setResult] = useState(null);
+            const [error, setError] = useState(null);
+
+            const handleSearch = async () => {
+                if (!idea.trim()) {
+                    alert('请输入你的创作想法');
+                    return;
+                }
+
+                if (materials.length === 0) {
+                    alert('素材库为空，请先到"素材库"添加一些素材');
+                    return;
+                }
+
+                setLoading(true);
+                setError(null);
+                setResult(null);
+
+                try {
+                    const aiResult = await searchMaterialsWithAI(idea, materials);
+                    setResult(aiResult);
+                } catch (err) {
+                    setError('AI 分析失败：' + err.message + '。请检查网络连接或稍后重试。');
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const handleAddTopic = (topicSuggestion) => {
+                const newTopic = {
+                    id: Date.now(),
+                    title: topicSuggestion.title,
+                    description: `${topicSuggestion.angle}\n\n推荐理由：${topicSuggestion.reason}`,
+                    source: 'AI推荐',
+                    status: 'pending',
+                    priority: 'high',
+                    difficulty: 2,
+                    createdAt: new Date().toISOString().split('T')[0]
+                };
+                setTopics([...topics, newTopic]);
+                alert('✅ 选题已添加到选题库！');
+            };
+
+            const handleUseMaterial = (materialId) => {
+                const updatedMaterials = materials.map(m => {
+                    if (m.id === materialId) {
+                        return {
+                            ...m,
+                            usageCount: m.usageCount + 1,
+                            lastUsed: new Date().toISOString().split('T')[0]
+                        };
+                    }
+                    return m;
+                });
+                setMaterials(updatedMaterials);
+                alert('✅ 素材使用次数已更新！');
+            };
+
+            return (
+                <div className="space-y-6">
+                    {/* 欢迎卡片 */}
+                    <div className="bg-gradient-to-r from-indigo-600 to-purple-600 rounded-xl shadow-2xl p-8 text-white">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <h1 className="text-3xl font-bold mb-2">🤖 AI 智能创作助手</h1>
+                                <p className="text-indigo-100 text-lg">输入你的创作想法，让 AI 帮你找到最合适的素材和选题建议</p>
+                            </div>
+                            <i className="fas fa-magic text-8xl text-white opacity-20"></i>
+                        </div>
+                    </div>
+
+                    {/* AI 搜索框 */}
+                    <div className="bg-white rounded-xl shadow-lg p-8">
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    <i className="fas fa-lightbulb text-yellow-500 mr-2"></i>
+                                    你想做什么样的短视频？
+                                </label>
+                                <textarea
+                                    value={idea}
+                                    onChange={(e) => setIdea(e.target.value)}
+                                    placeholder="例如：想做一期关于咖啡拉花技巧的教学视频&#10;例如：分享我的日常 vlog，展示我的工作环境&#10;例如：介绍一款好用的手机 App"
+                                    className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
+                                    rows="5"
+                                />
+                                <p className="text-sm text-gray-500 mt-2">
+                                    <i className="fas fa-info-circle mr-1"></i>
+                                    提示：描述越详细，AI 推荐的素材越精准
+                                </p>
+                            </div>
+
+                            <div className="flex justify-center">
+                                <button
+                                    onClick={handleSearch}
+                                    disabled={loading || !idea.trim() || materials.length === 0}
+                                    className={`px-8 py-4 rounded-xl font-bold text-lg transition-all ${
+                                        loading || !idea.trim() || materials.length === 0
+                                            ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                            : 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:shadow-2xl hover:scale-105'
+                                    }`}
+                                >
+                                    {loading ? (
+                                        <>
+                                            <i className="fas fa-spinner fa-spin mr-2"></i>
+                                            AI 分析中...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <i className="fas fa-search mr-2"></i>
+                                            开始 AI 检索
+                                        </>
+                                    )}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 错误提示 */}
+                    {error && (
+                        <div className="bg-red-50 border-2 border-red-200 rounded-xl p-6">
+                            <div className="flex items-center gap-3">
+                                <i className="fas fa-exclamation-circle text-3xl text-red-500"></i>
+                                <div>
+                                    <h3 className="font-bold text-red-800 mb-1">出错了</h3>
+                                    <p className="text-red-600">{error}</p>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* AI 分析结果 */}
+                    {result && (
+                        <div className="space-y-6">
+                            {/* 匹配的素材 */}
+                            {result.hasMatchingMaterials && result.matchedMaterials && result.matchedMaterials.length > 0 && (
+                                <div className="bg-white rounded-xl shadow-lg p-6">
+                                    <div className="flex items-center gap-3 mb-6">
+                                        <div className="bg-green-100 rounded-full p-3">
+                                            <i className="fas fa-check-circle text-2xl text-green-600"></i>
+                                        </div>
+                                        <div>
+                                            <h2 className="text-2xl font-bold text-gray-800">找到了 {result.matchedMaterials.length} 个合适的素材！</h2>
+                                            <p className="text-gray-600">这些素材非常适合你的创作想法</p>
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                        {result.matchedMaterials.map((match, idx) => {
+                                            const material = materials.find(m => m.id === match.materialId);
+                                            if (!material) return null;
+                                            return (
+                                                <div key={idx} className="border-2 border-green-200 rounded-xl p-4 bg-green-50 hover:shadow-lg transition-all">
+                                                    <div className="flex items-start justify-between mb-3">
+                                                        <div className="flex-1">
+                                                            <h3 className="font-bold text-gray-800 mb-1">{material.name}</h3>
+                                                            <p className="text-xs text-gray-600 mb-2">{material.scene}</p>
+                                                            <div className="flex flex-wrap gap-1 mb-2">
+                                                                {material.tags.slice(0, 3).map(tag => (
+                                                                    <span key={tag} className="text-xs px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-full">
+                                                                        {tag}
+                                                                    </span>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                        <span className="text-2xl">🎯</span>
+                                                    </div>
+                                                    
+                                                    <div className="space-y-2 text-sm mb-4">
+                                                        <div className="flex items-start gap-2">
+                                                            <i className="fas fa-star text-yellow-500 mt-0.5 flex-shrink-0"></i>
+                                                            <span className="text-gray-700">{match.reason}</span>
+                                                        </div>
+                                                        <div className="flex items-start gap-2">
+                                                            <i className="fas fa-lightbulb text-purple-500 mt-0.5 flex-shrink-0"></i>
+                                                            <span className="text-gray-700">{match.usage}</span>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="text-xs text-gray-500 mb-3 pb-3 border-b">
+                                                        <i className="fas fa-chart-bar mr-1"></i>
+                                                        已使用 {material.usageCount} 次
+                                                        {material.lastUsed && ` · ${material.lastUsed}`}
+                                                    </div>
+
+                                                    <button
+                                                        onClick={() => handleUseMaterial(material.id)}
+                                                        className="w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
+                                                    >
+                                                        <i className="fas fa-check mr-1"></i>
+                                                        标记使用
+                                                    </button>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* 缺少的素材 */}
+                            {result.missingMaterials && result.missingMaterials.length > 0 && (
+                                <div className="bg-white rounded-xl shadow-lg p-6">
+                                    <div className="flex items-center gap-3 mb-6">
+                                        <div className="bg-orange-100 rounded-full p-3">
+                                            <i className="fas fa-camera text-2xl text-orange-600"></i>
+                                        </div>
+                                        <div>
+                                            <h2 className="text-2xl font-bold text-gray-800">建议拍摄以下素材</h2>
+                                            <p className="text-gray-600">这些素材能让你的视频更完整</p>
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        {result.missingMaterials.map((missing, idx) => (
+                                            <div key={idx} className="border-2 border-orange-200 rounded-xl p-4 bg-orange-50">
+                                                <div className="flex items-start gap-3">
+                                                    <i className="fas fa-exclamation-triangle text-orange-500 text-xl mt-1 flex-shrink-0"></i>
+                                                    <div className="flex-1">
+                                                        <h3 className="font-bold text-gray-800 mb-2">{missing.type}</h3>
+                                                        <p className="text-gray-700 text-sm">{missing.suggestion}</p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* 选题建议 */}
+                            {result.topicSuggestions && result.topicSuggestions.length > 0 && (
+                                <div className="bg-white rounded-xl shadow-lg p-6">
+                                    <div className="flex items-center gap-3 mb-6">
+                                        <div className="bg-purple-100 rounded-full p-3">
+                                            <i className="fas fa-lightbulb text-2xl text-purple-600"></i>
+                                        </div>
+                                        <div>
+                                            <h2 className="text-2xl font-bold text-gray-800">AI 为你生成了 {result.topicSuggestions.length} 个选题</h2>
+                                            <p className="text-gray-600">点击添加到选题库</p>
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                        {result.topicSuggestions.map((topic, idx) => (
+                                            <div key={idx} className="border-2 border-purple-200 rounded-xl p-4 bg-purple-50 hover:shadow-lg transition-all">
+                                                <h3 className="font-bold text-gray-800 mb-2 text-lg">{topic.title}</h3>
+                                                <div className="space-y-2 text-sm mb-4">
+                                                    <p className="text-gray-700">
+                                                        <strong className="text-purple-700">切入角度：</strong>
+                                                        {topic.angle}
+                                                    </p>
+                                                    <p className="text-gray-700">
+                                                        <strong className="text-purple-700">推荐理由：</strong>
+                                                        {topic.reason}
+                                                    </p>
+                                                </div>
+                                                <button
+                                                    onClick={() => handleAddTopic(topic)}
+                                                    className="w-full px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm font-medium"
+                                                >
+                                                    <i className="fas fa-plus mr-1"></i>
+                                                    添加到选题库
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* 快捷操作 */}
+                            <div className="bg-gradient-to-r from-indigo-100 to-purple-100 rounded-xl p-6 text-center">
+                                <p className="text-gray-700 mb-4">
+                                    <i className="fas fa-magic mr-2"></i>
+                                    满意这次分析吗？继续优化你的创作
+                                </p>
+                                <button
+                                    onClick={() => {
+                                        setIdea('');
+                                        setResult(null);
+                                        setError(null);
+                                    }}
+                                    className="px-6 py-3 bg-white text-indigo-600 rounded-lg hover:shadow-lg transition-all font-medium"
+                                >
+                                    <i className="fas fa-redo mr-2"></i>
+                                    重新分析
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // ==================== 素材库管理 ====================
+        const MaterialsManager = ({ materials, setMaterials }) => {
+            const [showAddForm, setShowAddForm] = useState(false);
+            const [searchQuery, setSearchQuery] = useState('');
+            const [filterTag, setFilterTag] = useState('all');
+
+            const allTags = [...new Set(materials.flatMap(m => m.tags))];
+
+            const filteredMaterials = materials.filter(m => {
+                const matchSearch = m.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                                  m.tags.some(t => t.toLowerCase().includes(searchQuery.toLowerCase()));
+                const matchFilter = filterTag === 'all' || m.tags.includes(filterTag);
+                return matchSearch && matchFilter;
+            });
+
+            return (
+                <div className="space-y-6">
+                    {/* 统计卡片 */}
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <StatCard
+                            icon="fa-photo-film"
+                            title="总素材数"
+                            value={materials.length}
+                            color="blue"
+                        />
+                        <StatCard
+                            icon="fa-fire"
+                            title="高频素材"
+                            value={materials.filter(m => m.usageCount >= 3).length}
+                            color="red"
+                        />
+                        <StatCard
+                            icon="fa-tags"
+                            title="标签总数"
+                            value={allTags.length}
+                            color="green"
+                        />
+                        <StatCard
+                            icon="fa-clock"
+                            title="未使用素材"
+                            value={materials.filter(m => m.usageCount === 0).length}
+                            color="yellow"
+                        />
+                    </div>
+
+                    {/* 操作栏 */}
+                    <div className="bg-white rounded-xl shadow-md p-6">
+                        <div className="mb-3 bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">
+                            <i className="fas fa-info-circle mr-2"></i>
+                            提示：点击素材卡片右上角的 <i className="fas fa-edit text-blue-600 mx-1"></i> 图标可以编辑素材信息
+                        </div>
+                        <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
+                            <div className="flex-1 w-full">
+                                <div className="relative">
+                                    <i className="fas fa-search absolute left-3 top-3 text-gray-400"></i>
+                                    <input
+                                        type="text"
+                                        placeholder="搜索素材名称或标签..."
+                                        value={searchQuery}
+                                        onChange={(e) => setSearchQuery(e.target.value)}
+                                        className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                    />
+                                </div>
+                            </div>
+                            <div className="flex gap-2">
+                                <select
+                                    value={filterTag}
+                                    onChange={(e) => setFilterTag(e.target.value)}
+                                    className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                >
+                                    <option value="all">所有标签</option>
+                                    {allTags.map(tag => (
+                                        <option key={tag} value={tag}>{tag}</option>
+                                    ))}
+                                </select>
+                                <button
+                                    onClick={() => setShowAddForm(true)}
+                                    className="px-6 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg hover:shadow-lg transition-colors font-medium"
+                                >
+                                    <i className="fas fa-cloud-upload-alt mr-2"></i>上传素材
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 添加素材表单 */}
+                    {showAddForm && (
+                        <AddMaterialForm
+                            onClose={() => setShowAddForm(false)}
+                            onAdd={(material) => {
+                                setMaterials([...materials, { ...material, id: Date.now(), usageCount: 0, lastUsed: null }]);
+                                setShowAddForm(false);
+                            }}
+                        />
+                    )}
+
+                    {/* 素材列表 */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {filteredMaterials.length === 0 ? (
+                            <div className="col-span-full text-center py-16">
+                                <i className="fas fa-folder-open text-6xl text-gray-300 mb-4"></i>
+                                <p className="text-gray-500 text-lg">
+                                    {searchQuery || filterTag !== 'all' ? '没有找到匹配的素材' : '还没有添加素材，点击上方按钮开始添加吧！'}
+                                </p>
+                            </div>
+                        ) : (
+                            filteredMaterials.map(material => (
+                                <MaterialCard
+                                    key={material.id}
+                                    material={material}
+                                    onUpdate={(updated) => {
+                                        setMaterials(materials.map(m => m.id === updated.id ? updated : m));
+                                    }}
+                                    onDelete={(id) => {
+                                        if (confirm('确定要删除这个素材吗？')) {
+                                            setMaterials(materials.filter(m => m.id !== id));
+                                        }
+                                    }}
+                                />
+                            ))
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        // ==================== 素材卡片 ====================
+        const MaterialCard = ({ material, onUpdate, onDelete }) => {
+            const [showDetails, setShowDetails] = useState(false);
+            const [isEditing, setIsEditing] = useState(false);
+            const [editData, setEditData] = useState({
+                name: material.name,
+                scene: material.scene,
+                tags: material.tags.join(', '),
+                duration: material.duration || '',
+                note: material.note || ''
+            });
+
+            const handleSaveEdit = () => {
+                const updatedMaterial = {
+                    ...material,
+                    name: editData.name,
+                    scene: editData.scene,
+                    tags: editData.tags.split(',').map(t => t.trim()).filter(t => t),
+                    duration: editData.duration,
+                    note: editData.note
+                };
+                onUpdate(updatedMaterial);
+                setIsEditing(false);
+                alert('✅ 素材信息已更新！');
+            };
+
+            const handleCancelEdit = () => {
+                setEditData({
+                    name: material.name,
+                    scene: material.scene,
+                    tags: material.tags.join(', '),
+                    duration: material.duration || '',
+                    note: material.note || ''
+                });
+                setIsEditing(false);
+            };
+
+            return (
+                <div className="bg-white rounded-xl shadow-md overflow-hidden hover:shadow-xl transition-all">
+                    {/* 缩略图 */}
+                    {material.thumbnail && (
+                        <div className="h-48 bg-gray-200 overflow-hidden">
+                            <img src={material.thumbnail} alt={material.name} className="w-full h-full object-cover" />
+                        </div>
+                    )}
+
+                    <div className="p-4">
+                        {isEditing ? (
+                            // 编辑模式
+                            <div className="space-y-3">
+                                <div>
+                                    <label className="block text-xs font-medium text-gray-700 mb-1">素材名称</label>
+                                    <input
+                                        type="text"
+                                        value={editData.name}
+                                        onChange={(e) => setEditData({ ...editData, name: e.target.value })}
+                                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-medium text-gray-700 mb-1">场景描述</label>
+                                    <textarea
+                                        value={editData.scene}
+                                        onChange={(e) => setEditData({ ...editData, scene: e.target.value })}
+                                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                        rows="2"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-medium text-gray-700 mb-1">标签（用逗号分隔）</label>
+                                    <input
+                                        type="text"
+                                        value={editData.tags}
+                                        onChange={(e) => setEditData({ ...editData, tags: e.target.value })}
+                                        placeholder="例如：咖啡, 拉花, 教学"
+                                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-medium text-gray-700 mb-1">时长</label>
+                                    <input
+                                        type="text"
+                                        value={editData.duration}
+                                        onChange={(e) => setEditData({ ...editData, duration: e.target.value })}
+                                        placeholder="例如：15秒"
+                                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-medium text-gray-700 mb-1">备注</label>
+                                    <textarea
+                                        value={editData.note}
+                                        onChange={(e) => setEditData({ ...editData, note: e.target.value })}
+                                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                        rows="2"
+                                    />
+                                </div>
+                                <div className="flex gap-2 pt-2">
+                                    <button
+                                        onClick={handleSaveEdit}
+                                        className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm"
+                                    >
+                                        <i className="fas fa-check mr-1"></i>保存
+                                    </button>
+                                    <button
+                                        onClick={handleCancelEdit}
+                                        className="flex-1 px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition-colors text-sm"
+                                    >
+                                        <i className="fas fa-times mr-1"></i>取消
+                                    </button>
+                                </div>
+                            </div>
+                        ) : (
+                            // 查看模式
+                            <>
+                                {/* 标题与操作 */}
+                                <div className="flex items-start justify-between mb-3">
+                                    <h3 className="font-bold text-gray-800 text-lg flex-1">{material.name}</h3>
+                                    <div className="flex gap-2">
+                                        <button
+                                            onClick={() => setIsEditing(true)}
+                                            className="text-blue-600 hover:text-blue-800 text-lg"
+                                            title="编辑素材"
+                                        >
+                                            <i className="fas fa-edit"></i>
+                                        </button>
+                                        <button
+                                            onClick={() => setShowDetails(!showDetails)}
+                                            className="text-gray-400 hover:text-indigo-600 text-lg"
+                                            title="详情"
+                                        >
+                                            <i className={`fas fa-chevron-${showDetails ? 'up' : 'down'}`}></i>
+                                        </button>
+                                        <button
+                                            onClick={() => onDelete(material.id)}
+                                            className="text-red-400 hover:text-red-600 text-lg"
+                                            title="删除"
+                                        >
+                                            <i className="fas fa-trash"></i>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* 场景描述 */}
+                                <p className="text-sm text-gray-600 mb-3">{material.scene}</p>
+
+                                {/* 标签 */}
+                                <div className="flex flex-wrap gap-2 mb-3">
+                                    {material.tags.map(tag => (
+                                        <span
+                                            key={tag}
+                                            className="px-2 py-1 bg-indigo-100 text-indigo-700 text-xs rounded-full"
+                                        >
+                                            {tag}
+                                        </span>
+                                    ))}
+                                </div>
+
+                                {/* 使用统计 - 仅在有使用记录时显示 */}
+                                {(material.usageCount > 0 || material.lastUsed) && (
+                                    <div className="flex items-center justify-between text-sm mb-3 pb-3 border-b">
+                                        <div className="flex items-center gap-4">
+                                            {material.usageCount > 0 && (
+                                                <span className="text-gray-600">
+                                                    <i className="fas fa-chart-bar mr-1"></i>
+                                                    使用 {material.usageCount} 次
+                                                </span>
+                                            )}
+                                            {material.lastUsed && (
+                                                <span className="text-gray-600">
+                                                    <i className="fas fa-clock mr-1"></i>
+                                                    {material.lastUsed}
+                                                </span>
+                                            )}
+                                        </div>
+                                        {material.usageCount >= 3 && (
+                                            <span className="text-red-500 font-medium">
+                                                <i className="fas fa-fire"></i> 高频
+                                            </span>
+                                        )}
+                                    </div>
+                                )}
+
+                                {/* 详细信息 */}
+                                {showDetails && (
+                                    <div className="border-t pt-4 mt-4 space-y-2 text-sm">
+                                        {material.duration && (
+                                            <p><strong>时长：</strong>{material.duration}</p>
+                                        )}
+                                        {material.note && (
+                                            <p><strong>备注：</strong>{material.note}</p>
+                                        )}
+                                    </div>
+                                )}
+                            </>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        // ==================== 压缩图片 ====================
+        const compressImage = (base64Str, maxWidth = 800) => {
+            return new Promise((resolve) => {
+                const img = new Image();
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    let width = img.width;
+                    let height = img.height;
+                    
+                    // 如果图片宽度超过maxWidth，按比例缩放
+                    if (width > maxWidth) {
+                        height = Math.round(height * (maxWidth / width));
+                        width = maxWidth;
+                    }
+                    
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+                    
+                    // 压缩质量设为0.7
+                    resolve(canvas.toDataURL('image/jpeg', 0.7));
+                };
+                img.src = base64Str.startsWith('data:') ? base64Str : `data:image/jpeg;base64,${base64Str}`;
+            });
+        };
+
+        // ==================== 添加素材表单 ====================
+        const AddMaterialForm = ({ onClose, onAdd }) => {
+            const [uploading, setUploading] = useState(false);
+            const [analyzing, setAnalyzing] = useState(false);
+            const [preview, setPreview] = useState(null);
+            const [aiResult, setAiResult] = useState(null);
+            const [fileInfo, setFileInfo] = useState(null);
+            const [dragOver, setDragOver] = useState(false);
+            const [error, setError] = useState(null);
+            const [manualEdit, setManualEdit] = useState(false);
+            const [manualData, setManualData] = useState({
+                name: '',
+                scene: '',
+                tags: '',
+                duration: '',
+                note: ''
+            });
+            const fileInputRef = useRef(null);
+
+            const handleFile = async (file) => {
+                if (!file) return;
+                setError(null);
+                const fileType = file.type.startsWith('video/') ? 'video' : 'image';
+                setUploading(true);
+                setFileInfo({ name: file.name, type: fileType, size: (file.size / 1024 / 1024).toFixed(2) + ' MB' });
+                
+                try {
+                    let thumbnail, base64;
+                    if (fileType === 'video') {
+                        thumbnail = await extractVideoFrame(file);
+                        // 压缩视频缩略图
+                        thumbnail = await compressImage(thumbnail);
+                        base64 = thumbnail.split(',')[1];
+                        setPreview(thumbnail);
+                    } else {
+                        base64 = await imageToBase64(file);
+                        const fullImage = 'data:image/jpeg;base64,' + base64;
+                        // 压缩图片
+                        const compressed = await compressImage(fullImage);
+                        setPreview(compressed);
+                        base64 = compressed.split(',')[1];
+                    }
+                    setUploading(false);
+                    setAnalyzing(true);
+                    
+                    const analysis = await analyzeImageWithAI(base64);
+                    setAiResult(analysis);
+                    setManualData({
+                        name: analysis.suggestedName || file.name,
+                        scene: analysis.scene || '',
+                        tags: analysis.tags?.join(', ') || '',
+                        duration: '',
+                        note: `AI分析：${analysis.usage || ''} | 情绪：${analysis.mood || ''}`
+                    });
+                    setAnalyzing(false);
+                } catch (error) {
+                    console.error('处理错误:', error);
+                    setError('AI分析失败：' + error.message + '。你可以选择手动填写信息或重新上传。');
+                    setUploading(false);
+                    setAnalyzing(false);
+                    // AI 失败后，设置默认值供手动编辑
+                    setManualData({
+                        name: file.name,
+                        scene: '',
+                        tags: '',
+                        duration: '',
+                        note: ''
+                    });
+                }
+            };
+
+            const save = () => {
+                // 使用手动编辑的数据或AI结果
+                const dataToSave = manualEdit || !aiResult ? manualData : {
+                    name: aiResult.suggestedName || fileInfo.name,
+                    scene: aiResult.scene,
+                    tags: aiResult.tags?.join(', '),
+                    duration: '',
+                    note: `AI分析：${aiResult.usage} | 情绪：${aiResult.mood}`
+                };
+
+                if (!dataToSave.name) {
+                    setError('请至少填写素材名称');
+                    return;
+                }
+                
+                try {
+                    console.log('开始保存素材...', dataToSave);
+                    
+                    const newMaterial = {
+                        name: dataToSave.name,
+                        scene: dataToSave.scene || '未描述',
+                        tags: dataToSave.tags ? dataToSave.tags.split(',').map(t => t.trim()).filter(t => t) : ['未分类'],
+                        duration: dataToSave.duration || '',
+                        note: dataToSave.note || '',
+                        thumbnail: preview
+                    };
+                    
+                    console.log('素材数据准备完成，调用 onAdd...');
+                    onAdd(newMaterial);
+                    console.log('素材已添加，关闭弹窗...');
+                    alert('✅ 素材保存成功！');
+                    onClose();
+                } catch (error) {
+                    console.error('保存错误:', error);
+                    setError('保存失败：' + error.message);
+                }
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+                        <div className="p-6">
+                            <div className="flex items-center justify-between mb-6">
+                                <h2 className="text-2xl font-bold text-gray-800">
+                                    <i className="fas fa-cloud-upload-alt text-indigo-600 mr-2"></i>
+                                    上传素材 - AI 自动分析
+                                </h2>
+                                <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl">
+                                    <i className="fas fa-times"></i>
+                                </button>
+                            </div>
+
+                            {error && (
+                                <div className="mb-6 bg-red-50 border-2 border-red-200 rounded-lg p-4">
+                                    <div className="flex items-center gap-2">
+                                        <i className="fas fa-exclamation-circle text-red-500"></i>
+                                        <p className="text-red-700 text-sm">{error}</p>
+                                    </div>
+                                    <button 
+                                        onClick={() => {
+                                            setError(null);
+                                            setPreview(null);
+                                            setAiResult(null);
+                                            setFileInfo(null);
+                                        }}
+                                        className="mt-2 text-sm text-red-600 hover:text-red-800 underline"
+                                    >
+                                        重新上传
+                                    </button>
+                                </div>
+                            )}
+
+                            {!preview && (
+                                <div
+                                    className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all ${
+                                        dragOver ? 'border-indigo-600 bg-indigo-100' : 'border-gray-300 hover:border-indigo-500 hover:bg-indigo-50'
+                                    }`}
+                                    onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                                    onDragLeave={() => setDragOver(false)}
+                                    onDrop={(e) => {
+                                        e.preventDefault();
+                                        setDragOver(false);
+                                        const file = e.dataTransfer.files[0];
+                                        if (file && (file.type.startsWith('video/') || file.type.startsWith('image/'))) {
+                                            handleFile(file);
+                                        } else {
+                                            alert('请上传视频或图片文件');
+                                        }
+                                    }}
+                                    onClick={() => fileInputRef.current?.click()}
+                                >
+                                    <input
+                                        ref={fileInputRef}
+                                        type="file"
+                                        accept="video/*,image/*"
+                                        onChange={(e) => handleFile(e.target.files[0])}
+                                        className="hidden"
+                                    />
+                                    {uploading ? (
+                                        <>
+                                            <i className="fas fa-spinner fa-spin text-6xl text-indigo-600 mb-4"></i>
+                                            <p className="text-lg font-medium text-gray-700">处理文件中...</p>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <i className="fas fa-cloud-upload-alt text-6xl text-gray-400 mb-4"></i>
+                                            <p className="text-lg font-medium text-gray-700">点击或拖拽文件到这里</p>
+                                            <p className="text-sm text-gray-500 mt-2">支持视频（MP4, MOV）和图片（JPG, PNG）</p>
+                                        </>
+                                    )}
+                                </div>
+                            )}
+
+                            {preview && (
+                                <div className="space-y-6">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                        {/* 预览 */}
+                                        <div>
+                                            <h3 className="font-bold text-gray-800 mb-3">预览</h3>
+                                            <img src={preview} alt="预览" className="w-full rounded-lg shadow-md" />
+                                            <div className="mt-3 text-sm text-gray-600">
+                                                <p><i className="fas fa-file mr-2"></i>{fileInfo.name}</p>
+                                                <p><i className="fas fa-hdd mr-2"></i>{fileInfo.size}</p>
+                                            </div>
+                                        </div>
+
+                                        {/* AI 分析结果或手动编辑 */}
+                                        <div>
+                                            <div className="flex items-center justify-between mb-3">
+                                                <h3 className="font-bold text-gray-800">
+                                                    {manualEdit ? '手动编辑' : 'AI 分析结果'}
+                                                </h3>
+                                                {(aiResult || error) && (
+                                                    <button
+                                                        onClick={() => setManualEdit(!manualEdit)}
+                                                        className="text-sm text-indigo-600 hover:text-indigo-800"
+                                                    >
+                                                        <i className={`fas ${manualEdit ? 'fa-robot' : 'fa-edit'} mr-1`}></i>
+                                                        {manualEdit ? '查看AI结果' : '手动编辑'}
+                                                    </button>
+                                                )}
+                                            </div>
+
+                                            {analyzing ? (
+                                                <div className="flex items-center justify-center h-64">
+                                                    <div className="text-center">
+                                                        <i className="fas fa-robot fa-spin text-5xl text-indigo-600 mb-3"></i>
+                                                        <p className="text-gray-700">AI 正在分析素材...</p>
+                                                    </div>
+                                                </div>
+                                            ) : manualEdit || !aiResult ? (
+                                                // 手动编辑表单
+                                                <div className="space-y-3">
+                                                    <div>
+                                                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                                                            素材名称 *
+                                                        </label>
+                                                        <input
+                                                            type="text"
+                                                            value={manualData.name}
+                                                            onChange={(e) => setManualData({...manualData, name: e.target.value})}
+                                                            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                                            placeholder="输入素材名称"
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                                                            场景描述
+                                                        </label>
+                                                        <textarea
+                                                            value={manualData.scene}
+                                                            onChange={(e) => setManualData({...manualData, scene: e.target.value})}
+                                                            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                                            rows="3"
+                                                            placeholder="描述素材的场景内容"
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                                                            标签（用逗号分隔）
+                                                        </label>
+                                                        <input
+                                                            type="text"
+                                                            value={manualData.tags}
+                                                            onChange={(e) => setManualData({...manualData, tags: e.target.value})}
+                                                            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                                            placeholder="例如：咖啡, 拉花, 教学"
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                                                            时长
+                                                        </label>
+                                                        <input
+                                                            type="text"
+                                                            value={manualData.duration}
+                                                            onChange={(e) => setManualData({...manualData, duration: e.target.value})}
+                                                            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                                            placeholder="例如：15秒"
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                                                            备注
+                                                        </label>
+                                                        <textarea
+                                                            value={manualData.note}
+                                                            onChange={(e) => setManualData({...manualData, note: e.target.value})}
+                                                            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                                            rows="2"
+                                                            placeholder="其他备注信息"
+                                                        />
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                // AI 分析结果显示
+                                                <div className="space-y-4">
+                                                    <div className="bg-indigo-50 rounded-lg p-4">
+                                                        <label className="text-sm font-medium text-gray-700">建议文件名</label>
+                                                        <p className="text-gray-800 mt-1">{aiResult.suggestedName}</p>
+                                                    </div>
+                                                    <div className="bg-purple-50 rounded-lg p-4">
+                                                        <label className="text-sm font-medium text-gray-700">场景描述</label>
+                                                        <p className="text-gray-800 mt-1">{aiResult.scene}</p>
+                                                    </div>
+                                                    <div className="bg-green-50 rounded-lg p-4">
+                                                        <label className="text-sm font-medium text-gray-700">标签</label>
+                                                        <div className="flex flex-wrap gap-2 mt-2">
+                                                            {aiResult.tags?.map(tag => (
+                                                                <span key={tag} className="px-3 py-1 bg-green-600 text-white rounded-full text-sm">
+                                                                    {tag}
+                                                                </span>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                    <div className="bg-orange-50 rounded-lg p-4">
+                                                        <label className="text-sm font-medium text-gray-700">使用建议</label>
+                                                        <p className="text-gray-800 mt-1">{aiResult.usage}</p>
+                                                    </div>
+                                                    <div className="bg-pink-50 rounded-lg p-4">
+                                                        <label className="text-sm font-medium text-gray-700">情绪氛围</label>
+                                                        <p className="text-gray-800 mt-1">{aiResult.mood}</p>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    <div className="flex gap-3 justify-end">
+                                        <button
+                                            onClick={onClose}
+                                            className="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
+                                        >
+                                            取消
+                                        </button>
+                                        <button
+                                            onClick={save}
+                                            disabled={analyzing}
+                                            className={`px-6 py-2 rounded-lg font-medium ${
+                                                analyzing
+                                                    ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                                    : 'bg-indigo-600 text-white hover:bg-indigo-700'
+                                            }`}
+                                        >
+                                            <i className="fas fa-check mr-2"></i>
+                                            保存素材
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // ==================== 选题库管理 ====================
+        const TopicsManager = ({ topics, setTopics }) => {
+            const [showAddForm, setShowAddForm] = useState(false);
+            const [filter, setFilter] = useState('all');
+
+            const filteredTopics = topics.filter(t => {
+                if (filter === 'all') return true;
+                return t.status === filter;
+            });
+
+            const statusMap = {
+                pending: { label: '待制作', color: 'yellow', icon: 'fa-clock' },
+                inProgress: { label: '制作中', color: 'blue', icon: 'fa-spinner' },
+                completed: { label: '已完成', color: 'green', icon: 'fa-check' }
+            };
+
+            return (
+                <div className="space-y-6">
+                    {/* 统计卡片 */}
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <StatCard icon="fa-lightbulb" title="总选题数" value={topics.length} color="purple" />
+                        <StatCard icon="fa-clock" title="待制作" value={topics.filter(t => t.status === 'pending').length} color="yellow" />
+                        <StatCard icon="fa-spinner" title="制作中" value={topics.filter(t => t.status === 'inProgress').length} color="blue" />
+                        <StatCard icon="fa-check" title="已完成" value={topics.filter(t => t.status === 'completed').length} color="green" />
+                    </div>
+
+                    {/* 操作栏 */}
+                    <div className="bg-white rounded-xl shadow-md p-6">
+                        <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
+                            <div className="flex gap-2">
+                                {['all', 'pending', 'inProgress', 'completed'].map(s => (
+                                    <button
+                                        key={s}
+                                        onClick={() => setFilter(s)}
+                                        className={`px-4 py-2 rounded-lg font-medium transition-all ${
+                                            filter === s
+                                                ? 'bg-indigo-600 text-white'
+                                                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                        }`}
+                                    >
+                                        {s === 'all' ? '全部' : statusMap[s].label}
+                                    </button>
+                                ))}
+                            </div>
+                            <button
+                                onClick={() => setShowAddForm(true)}
+                                className="px-6 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg hover:shadow-lg transition-colors font-medium"
+                            >
+                                <i className="fas fa-plus mr-2"></i>添加选题
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* 添加选题表单 */}
+                    {showAddForm && (
+                        <AddTopicForm
+                            onClose={() => setShowAddForm(false)}
+                            onAdd={(topic) => {
+                                setTopics([...topics, { ...topic, id: Date.now(), createdAt: new Date().toISOString().split('T')[0] }]);
+                                setShowAddForm(false);
+                            }}
+                        />
+                    )}
+
+                    {/* 选题列表 */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {filteredTopics.length === 0 ? (
+                            <div className="col-span-full text-center py-16">
+                                <i className="fas fa-lightbulb text-6xl text-gray-300 mb-4"></i>
+                                <p className="text-gray-500 text-lg">
+                                    {filter !== 'all' ? '该状态下没有选题' : '还没有添加选题，点击上方按钮开始添加吧！'}
+                                </p>
+                            </div>
+                        ) : (
+                            filteredTopics.map(topic => (
+                                <TopicCard
+                                    key={topic.id}
+                                    topic={topic}
+                                    statusMap={statusMap}
+                                    onUpdate={(updated) => {
+                                        setTopics(topics.map(t => t.id === updated.id ? updated : t));
+                                    }}
+                                    onDelete={(id) => {
+                                        if (confirm('确定要删除这个选题吗？')) {
+                                            setTopics(topics.filter(t => t.id !== id));
+                                        }
+                                    }}
+                                />
+                            ))
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        // ==================== 选题卡片 ====================
+        const TopicCard = ({ topic, statusMap, onUpdate, onDelete }) => {
+            const [showDetails, setShowDetails] = useState(false);
+            const [isEditing, setIsEditing] = useState(false);
+            const [editData, setEditData] = useState({
+                title: topic.title,
+                description: topic.description,
+                source: topic.source,
+                priority: topic.priority,
+                difficulty: topic.difficulty
+            });
+
+            const status = statusMap[topic.status];
+
+            const priorityMap = {
+                low: { label: '低', color: 'green' },
+                medium: { label: '中', color: 'yellow' },
+                high: { label: '高', color: 'red' }
+            };
+
+            const handleSaveEdit = () => {
+                const updatedTopic = {
+                    ...topic,
+                    title: editData.title,
+                    description: editData.description,
+                    source: editData.source,
+                    priority: editData.priority,
+                    difficulty: editData.difficulty
+                };
+                onUpdate(updatedTopic);
+                setIsEditing(false);
+                alert('✅ 选题信息已更新！');
+            };
+
+            const handleCancelEdit = () => {
+                setEditData({
+                    title: topic.title,
+                    description: topic.description,
+                    source: topic.source,
+                    priority: topic.priority,
+                    difficulty: topic.difficulty
+                });
+                setIsEditing(false);
+            };
+
+            return (
+                <div className="bg-white rounded-xl shadow-md p-5 hover:shadow-xl transition-all">
+                    {isEditing ? (
+                        // 编辑模式
+                        <div className="space-y-3">
+                            <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">选题标题</label>
+                                <input
+                                    type="text"
+                                    value={editData.title}
+                                    onChange={(e) => setEditData({ ...editData, title: e.target.value })}
+                                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">选题描述</label>
+                                <textarea
+                                    value={editData.description}
+                                    onChange={(e) => setEditData({ ...editData, description: e.target.value })}
+                                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                    rows="3"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">来源</label>
+                                <input
+                                    type="text"
+                                    value={editData.source}
+                                    onChange={(e) => setEditData({ ...editData, source: e.target.value })}
+                                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                />
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="block text-xs font-medium text-gray-700 mb-1">优先级</label>
+                                    <select
+                                        value={editData.priority}
+                                        onChange={(e) => setEditData({ ...editData, priority: e.target.value })}
+                                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                    >
+                                        <option value="low">低</option>
+                                        <option value="medium">中</option>
+                                        <option value="high">高</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-medium text-gray-700 mb-1">难度</label>
+                                    <select
+                                        value={editData.difficulty}
+                                        onChange={(e) => setEditData({ ...editData, difficulty: parseInt(e.target.value) })}
+                                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                    >
+                                        <option value="1">⭐ 简单</option>
+                                        <option value="2">⭐⭐ 中等</option>
+                                        <option value="3">⭐⭐⭐ 困难</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div className="flex gap-2 pt-2">
+                                <button
+                                    onClick={handleSaveEdit}
+                                    className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm"
+                                >
+                                    <i className="fas fa-check mr-1"></i>保存
+                                </button>
+                                <button
+                                    onClick={handleCancelEdit}
+                                    className="flex-1 px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition-colors text-sm"
+                                >
+                                    <i className="fas fa-times mr-1"></i>取消
+                                </button>
+                            </div>
+                        </div>
+                    ) : (
+                        // 查看模式
+                        <>
+                            <div className="flex items-start justify-between mb-3">
+                                <h3 className="font-bold text-gray-800 text-lg flex-1">{topic.title}</h3>
+                                <div className="flex gap-2">
+                                    <button
+                                        onClick={() => setIsEditing(true)}
+                                        className="text-blue-600 hover:text-blue-800 text-lg"
+                                        title="编辑选题"
+                                    >
+                                        <i className="fas fa-edit"></i>
+                                    </button>
+                                    <button
+                                        onClick={() => setShowDetails(!showDetails)}
+                                        className="text-gray-400 hover:text-indigo-600 text-lg"
+                                        title="详情"
+                                    >
+                                        <i className={`fas fa-chevron-${showDetails ? 'up' : 'down'}`}></i>
+                                    </button>
+                                    <button
+                                        onClick={() => onDelete(topic.id)}
+                                        className="text-red-400 hover:text-red-600 text-lg"
+                                        title="删除"
+                                    >
+                                        <i className="fas fa-trash"></i>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <p className="text-sm text-gray-600 mb-4 line-clamp-3">{topic.description}</p>
+
+                            <div className="flex items-center gap-3 mb-4">
+                                <span className={`px-3 py-1 bg-${status.color}-100 text-${status.color}-700 text-xs rounded-full font-medium`}>
+                                    <i className={`fas ${status.icon} mr-1`}></i>
+                                    {status.label}
+                                </span>
+                                <span className={`px-3 py-1 bg-${priorityMap[topic.priority].color}-100 text-${priorityMap[topic.priority].color}-700 text-xs rounded-full`}>
+                                    优先级: {priorityMap[topic.priority].label}
+                                </span>
+                            </div>
+
+                            {showDetails && (
+                                <div className="border-t pt-4 mt-4 space-y-2 text-sm">
+                                    <p><strong>来源：</strong>{topic.source}</p>
+                                    <p><strong>难度：</strong>{'⭐'.repeat(topic.difficulty)}</p>
+                                    <p><strong>创建时间：</strong>{topic.createdAt}</p>
+                                </div>
+                            )}
+
+                            <div className="mt-4 pt-4 border-t flex gap-2">
+                                {topic.status !== 'completed' && (
+                                    <button
+                                        onClick={() => {
+                                            const nextStatus = topic.status === 'pending' ? 'inProgress' : 'completed';
+                                            onUpdate({ ...topic, status: nextStatus });
+                                        }}
+                                        className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-sm"
+                                    >
+                                        <i className="fas fa-arrow-right mr-1"></i>
+                                        {topic.status === 'pending' ? '开始制作' : '标记完成'}
+                                    </button>
+                                )}
+                                {topic.status === 'completed' && (
+                                    <button
+                                        onClick={() => onUpdate({ ...topic, status: 'pending' })}
+                                        className="flex-1 px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors text-sm"
+                                    >
+                                        <i className="fas fa-redo mr-1"></i>
+                                        重置状态
+                                    </button>
+                                )}
+                            </div>
+                        </>
+                    )}
+                </div>
+            );
+        };
+
+        // ==================== 添加选题表单 ====================
+        const AddTopicForm = ({ onClose, onAdd }) => {
+            const [formData, setFormData] = useState({
+                title: '',
+                description: '',
+                source: '手动添加',
+                status: 'pending',
+                priority: 'medium',
+                difficulty: 2
+            });
+
+            const handleSubmit = () => {
+                if (!formData.title || !formData.description) {
+                    alert('请填写标题和描述');
+                    return;
+                }
+                onAdd(formData);
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full">
+                        <div className="p-6">
+                            <div className="flex items-center justify-between mb-6">
+                                <h2 className="text-2xl font-bold text-gray-800">
+                                    <i className="fas fa-plus text-indigo-600 mr-2"></i>
+                                    添加选题
+                                </h2>
+                                <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl">
+                                    <i className="fas fa-times"></i>
+                                </button>
+                            </div>
+
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">选题标题 *</label>
+                                    <input
+                                        type="text"
+                                        value={formData.title}
+                                        onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                                        placeholder="例如：咖啡拉花教学"
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">选题描述 *</label>
+                                    <textarea
+                                        value={formData.description}
+                                        onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                                        placeholder="详细描述选题内容、拍摄要点等"
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                        rows="4"
+                                    />
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-2">优先级</label>
+                                        <select
+                                            value={formData.priority}
+                                            onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
+                                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                        >
+                                            <option value="low">低</option>
+                                            <option value="medium">中</option>
+                                            <option value="high">高</option>
+                                        </select>
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-2">难度</label>
+                                        <select
+                                            value={formData.difficulty}
+                                            onChange={(e) => setFormData({ ...formData, difficulty: parseInt(e.target.value) })}
+                                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                        >
+                                            <option value="1">⭐ 简单</option>
+                                            <option value="2">⭐⭐ 中等</option>
+                                            <option value="3">⭐⭐⭐ 困难</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">来源</label>
+                                    <input
+                                        type="text"
+                                        value={formData.source}
+                                        onChange={(e) => setFormData({ ...formData, source: e.target.value })}
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="flex gap-3 justify-end mt-6">
+                                <button
+                                    onClick={onClose}
+                                    className="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
+                                >
+                                    取消
+                                </button>
+                                <button
+                                    onClick={handleSubmit}
+                                    className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+                                >
+                                    <i className="fas fa-check mr-2"></i>
+                                    添加
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // ==================== 成品库管理 ====================
+        const VideosManager = ({ videos, setVideos, materials }) => {
+            const [showAddForm, setShowAddForm] = useState(false);
+
+            return (
+                <div className="space-y-6">
+                    {/* 统计卡片 */}
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <StatCard icon="fa-video" title="总视频数" value={videos.length} color="blue" />
+                        <StatCard icon="fa-eye" title="总播放量" value={videos.reduce((sum, v) => sum + (v.views || 0), 0).toLocaleString()} color="purple" />
+                        <StatCard icon="fa-heart" title="总点赞数" value={videos.reduce((sum, v) => sum + (v.likes || 0), 0).toLocaleString()} color="red" />
+                        <StatCard icon="fa-fire" title="爆款视频" value={videos.filter(v => v.views >= 100000).length} color="orange" />
+                    </div>
+
+                    {/* 操作栏 */}
+                    <div className="bg-white rounded-xl shadow-md p-6">
+                        <div className="flex justify-end">
+                            <button
+                                onClick={() => setShowAddForm(true)}
+                                className="px-6 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg hover:shadow-lg transition-colors font-medium"
+                            >
+                                <i className="fas fa-plus mr-2"></i>添加视频
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* 添加视频表单 */}
+                    {showAddForm && (
+                        <AddVideoForm
+                            materials={materials}
+                            onClose={() => setShowAddForm(false)}
+                            onAdd={(video) => {
+                                setVideos([...videos, { ...video, id: Date.now() }]);
+                                setShowAddForm(false);
+                            }}
+                        />
+                    )}
+
+                    {/* 视频列表 */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {videos.length === 0 ? (
+                            <div className="col-span-full text-center py-16">
+                                <i className="fas fa-video text-6xl text-gray-300 mb-4"></i>
+                                <p className="text-gray-500 text-lg">还没有添加视频，点击上方按钮开始添加吧！</p>
+                            </div>
+                        ) : (
+                            videos.map(video => (
+                                <VideoCard
+                                    key={video.id}
+                                    video={video}
+                                    onUpdate={(updated) => {
+                                        setVideos(videos.map(v => v.id === updated.id ? updated : v));
+                                    }}
+                                    onDelete={(id) => {
+                                        if (confirm('确定要删除这个视频吗？')) {
+                                            setVideos(videos.filter(v => v.id !== id));
+                                        }
+                                    }}
+                                />
+                            ))
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        // ==================== 视频卡片 ====================
+        const VideoCard = ({ video, onUpdate, onDelete }) => {
+            const [isEditing, setIsEditing] = useState(false);
+            const [editData, setEditData] = useState({ 
+                title: video.title,
+                publishDate: video.publishDate,
+                views: video.views || 0, 
+                likes: video.likes || 0, 
+                completion: video.completion || 0 
+            });
+
+            const handleSaveEdit = () => {
+                const updatedVideo = {
+                    ...video,
+                    title: editData.title,
+                    publishDate: editData.publishDate,
+                    views: parseInt(editData.views) || 0,
+                    likes: parseInt(editData.likes) || 0,
+                    completion: parseInt(editData.completion) || 0
+                };
+                onUpdate(updatedVideo);
+                setIsEditing(false);
+                alert('✅ 视频信息已更新！');
+            };
+
+            const handleCancelEdit = () => {
+                setEditData({
+                    title: video.title,
+                    publishDate: video.publishDate,
+                    views: video.views || 0,
+                    likes: video.likes || 0,
+                    completion: video.completion || 0
+                });
+                setIsEditing(false);
+            };
+
+            return (
+                <div className="bg-white rounded-xl shadow-md p-5 hover:shadow-xl transition-all">
+                    {isEditing ? (
+                        // 编辑模式
+                        <div className="space-y-3">
+                            <div className="flex items-start justify-between mb-3">
+                                <h3 className="font-bold text-gray-800 text-lg">编辑视频信息</h3>
+                                <button
+                                    onClick={() => onDelete(video.id)}
+                                    className="text-gray-400 hover:text-red-600"
+                                    title="删除"
+                                >
+                                    <i className="fas fa-trash"></i>
+                                </button>
+                            </div>
+                            
+                            <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">视频标题</label>
+                                <input
+                                    type="text"
+                                    value={editData.title}
+                                    onChange={(e) => setEditData({ ...editData, title: e.target.value })}
+                                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                />
+                            </div>
+                            
+                            <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">发布日期</label>
+                                <input
+                                    type="date"
+                                    value={editData.publishDate}
+                                    onChange={(e) => setEditData({ ...editData, publishDate: e.target.value })}
+                                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                />
+                            </div>
+                            
+                            <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">播放量</label>
+                                <input
+                                    type="number"
+                                    value={editData.views}
+                                    onChange={(e) => setEditData({ ...editData, views: e.target.value })}
+                                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                />
+                            </div>
+                            
+                            <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">点赞数</label>
+                                <input
+                                    type="number"
+                                    value={editData.likes}
+                                    onChange={(e) => setEditData({ ...editData, likes: e.target.value })}
+                                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                />
+                            </div>
+                            
+                            <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">完播率 (%)</label>
+                                <input
+                                    type="number"
+                                    value={editData.completion}
+                                    onChange={(e) => setEditData({ ...editData, completion: e.target.value })}
+                                    min="0"
+                                    max="100"
+                                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                />
+                            </div>
+                            
+                            <div className="flex gap-2 pt-2">
+                                <button
+                                    onClick={handleSaveEdit}
+                                    className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm"
+                                >
+                                    <i className="fas fa-check mr-1"></i>保存
+                                </button>
+                                <button
+                                    onClick={handleCancelEdit}
+                                    className="flex-1 px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition-colors text-sm"
+                                >
+                                    <i className="fas fa-times mr-1"></i>取消
+                                </button>
+                            </div>
+                        </div>
+                    ) : (
+                        // 查看模式
+                        <>
+                            <div className="flex items-start justify-between mb-3">
+                                <h3 className="font-bold text-gray-800 text-lg flex-1">{video.title}</h3>
+                                <div className="flex gap-2">
+                                    <button
+                                        onClick={() => setIsEditing(true)}
+                                        className="text-blue-600 hover:text-blue-800 text-lg"
+                                        title="编辑视频"
+                                    >
+                                        <i className="fas fa-edit"></i>
+                                    </button>
+                                    <button
+                                        onClick={() => onDelete(video.id)}
+                                        className="text-red-400 hover:text-red-600 text-lg"
+                                        title="删除"
+                                    >
+                                        <i className="fas fa-trash"></i>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="space-y-3 mb-4">
+                                <div className="flex items-center justify-between text-sm">
+                                    <span className="text-gray-600"><i className="fas fa-calendar mr-1"></i>发布日期</span>
+                                    <span className="font-medium">{video.publishDate}</span>
+                                </div>
+                                <div className="flex items-center justify-between text-sm">
+                                    <span className="text-gray-600"><i className="fas fa-eye mr-1"></i>播放量</span>
+                                    <span className="font-medium text-blue-600">{(video.views || 0).toLocaleString()}</span>
+                                </div>
+                                <div className="flex items-center justify-between text-sm">
+                                    <span className="text-gray-600"><i className="fas fa-heart mr-1"></i>点赞数</span>
+                                    <span className="font-medium text-red-600">{(video.likes || 0).toLocaleString()}</span>
+                                </div>
+                                <div className="flex items-center justify-between text-sm">
+                                    <span className="text-gray-600"><i className="fas fa-chart-line mr-1"></i>完播率</span>
+                                    <span className="font-medium text-green-600">{video.completion || 0}%</span>
+                                </div>
+                            </div>
+                        </>
+                    )}
+                </div>
+            );
+        };
+
+        // ==================== 添加视频表单 ====================
+        const AddVideoForm = ({ materials, onClose, onAdd }) => {
+            const [formData, setFormData] = useState({
+                title: '',
+                publishDate: new Date().toISOString().split('T')[0],
+                usedMaterials: [],
+                views: 0,
+                likes: 0,
+                completion: 0
+            });
+
+            const handleSubmit = () => {
+                if (!formData.title) {
+                    alert('请填写视频标题');
+                    return;
+                }
+                onAdd(formData);
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full">
+                        <div className="p-6">
+                            <div className="flex items-center justify-between mb-6">
+                                <h2 className="text-2xl font-bold text-gray-800">
+                                    <i className="fas fa-plus text-indigo-600 mr-2"></i>
+                                    添加视频
+                                </h2>
+                                <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl">
+                                    <i className="fas fa-times"></i>
+                                </button>
+                            </div>
+
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">视频标题 *</label>
+                                    <input
+                                        type="text"
+                                        value={formData.title}
+                                        onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                                        placeholder="例如：咖啡拉花入门教程"
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">发布日期</label>
+                                    <input
+                                        type="date"
+                                        value={formData.publishDate}
+                                        onChange={(e) => setFormData({ ...formData, publishDate: e.target.value })}
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                    />
+                                </div>
+
+                                <div className="grid grid-cols-3 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-2">播放量</label>
+                                        <input
+                                            type="number"
+                                            value={formData.views}
+                                            onChange={(e) => setFormData({ ...formData, views: parseInt(e.target.value) || 0 })}
+                                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-2">点赞数</label>
+                                        <input
+                                            type="number"
+                                            value={formData.likes}
+                                            onChange={(e) => setFormData({ ...formData, likes: parseInt(e.target.value) || 0 })}
+                                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-2">完播率 (%)</label>
+                                        <input
+                                            type="number"
+                                            value={formData.completion}
+                                            onChange={(e) => setFormData({ ...formData, completion: parseInt(e.target.value) || 0 })}
+                                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="flex gap-3 justify-end mt-6">
+                                <button
+                                    onClick={onClose}
+                                    className="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
+                                >
+                                    取消
+                                </button>
+                                <button
+                                    onClick={handleSubmit}
+                                    className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+                                >
+                                    <i className="fas fa-check mr-2"></i>
+                                    添加
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // ==================== 数据分析页面 ====================
+        const Analytics = ({ videos }) => {
+            const totalViews = videos.reduce((sum, v) => sum + (v.views || 0), 0);
+            const totalLikes = videos.reduce((sum, v) => sum + (v.likes || 0), 0);
+            const avgCompletion = videos.length > 0 
+                ? Math.round(videos.reduce((sum, v) => sum + (v.completion || 0), 0) / videos.length)
+                : 0;
+            
+            const hotVideos = videos
+                .filter(v => v.views >= 100000)
+                .sort((a, b) => b.views - a.views)
+                .slice(0, 5);
+            
+            const recentVideos = [...videos]
+                .sort((a, b) => new Date(b.publishDate) - new Date(a.publishDate))
+                .slice(0, 5);
+
+            return (
+                <div className="space-y-6">
+                    {/* 总览统计 */}
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <StatCard
+                            icon="fa-video"
+                            title="总视频数"
+                            value={videos.length}
+                            color="blue"
+                        />
+                        <StatCard
+                            icon="fa-eye"
+                            title="总播放量"
+                            value={totalViews.toLocaleString()}
+                            color="purple"
+                        />
+                        <StatCard
+                            icon="fa-heart"
+                            title="总点赞数"
+                            value={totalLikes.toLocaleString()}
+                            color="red"
+                        />
+                        <StatCard
+                            icon="fa-chart-line"
+                            title="平均完播率"
+                            value={`${avgCompletion}%`}
+                            color="green"
+                        />
+                    </div>
+
+                    {/* 爆款视频 */}
+                    <div className="bg-white rounded-xl shadow-md p-6">
+                        <h2 className="text-xl font-bold text-gray-800 mb-4">
+                            <i className="fas fa-fire text-red-500 mr-2"></i>
+                            爆款视频 TOP 5
+                        </h2>
+                        {hotVideos.length === 0 ? (
+                            <p className="text-gray-500 text-center py-8">暂无播放量超过10万的视频</p>
+                        ) : (
+                            <div className="space-y-3">
+                                {hotVideos.map((video, idx) => (
+                                    <div key={video.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                                        <div className="flex items-center gap-4">
+                                            <span className="text-2xl font-bold text-gray-300">#{idx + 1}</span>
+                                            <div>
+                                                <h3 className="font-bold text-gray-800">{video.title}</h3>
+                                                <p className="text-sm text-gray-500">{video.publishDate}</p>
+                                            </div>
+                                        </div>
+                                        <div className="text-right">
+                                            <p className="text-lg font-bold text-blue-600">
+                                                {video.views.toLocaleString()} 播放
+                                            </p>
+                                            <p className="text-sm text-gray-500">
+                                                {video.likes.toLocaleString()} 点赞
+                                            </p>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* 最近发布 */}
+                    <div className="bg-white rounded-xl shadow-md p-6">
+                        <h2 className="text-xl font-bold text-gray-800 mb-4">
+                            <i className="fas fa-calendar text-indigo-600 mr-2"></i>
+                            最近发布
+                        </h2>
+                        {recentVideos.length === 0 ? (
+                            <p className="text-gray-500 text-center py-8">还没有视频记录</p>
+                        ) : (
+                            <div className="space-y-3">
+                                {recentVideos.map(video => (
+                                    <div key={video.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                                        <div>
+                                            <h3 className="font-bold text-gray-800">{video.title}</h3>
+                                            <p className="text-sm text-gray-500">{video.publishDate}</p>
+                                        </div>
+                                        <div className="flex gap-6 text-sm">
+                                            <div className="text-center">
+                                                <i className="fas fa-eye text-blue-500"></i>
+                                                <p className="font-medium">{video.views?.toLocaleString() || 0}</p>
+                                            </div>
+                                            <div className="text-center">
+                                                <i className="fas fa-heart text-red-500"></i>
+                                                <p className="font-medium">{video.likes?.toLocaleString() || 0}</p>
+                                            </div>
+                                            <div className="text-center">
+                                                <i className="fas fa-chart-line text-green-500"></i>
+                                                <p className="font-medium">{video.completion || 0}%</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        // ==================== 设置页面 ====================
+        const SettingsPage = ({ aiProviders, setAiProviders, selectedProvider, setSelectedProvider }) => {
+            const [showAddForm, setShowAddForm] = useState(false);
+            const [editingProvider, setEditingProvider] = useState(null);
+
+            // 预设的AI模型配置模板
+            const providerTemplates = {
+                doubao: {
+                    name: '豆包（字节跳动）',
+                    type: 'doubao',
+                    icon: '🤖',
+                    description: '字节跳动的豆包大模型，支持图像理解和文本生成',
+                    vision: {
+                        enabled: true,
+                        apiEndpoint: 'https://ark.cn-beijing.volces.com/api/v3/chat/completions',
+                        model: 'doubao-vision-pro-32k',
+                        apiKey: ''
+                    },
+                    text: {
+                        enabled: true,
+                        apiEndpoint: 'https://ark.cn-beijing.volces.com/api/v3/chat/completions',
+                        model: 'doubao-pro-32k',
+                        apiKey: ''
+                    }
+                },
+                openai: {
+                    name: 'OpenAI (GPT)',
+                    type: 'openai',
+                    icon: '🔮',
+                    description: 'OpenAI 的 GPT 系列模型',
+                    vision: {
+                        enabled: true,
+                        apiEndpoint: 'https://api.openai.com/v1/chat/completions',
+                        model: 'gpt-4-vision-preview',
+                        apiKey: ''
+                    },
+                    text: {
+                        enabled: true,
+                        apiEndpoint: 'https://api.openai.com/v1/chat/completions',
+                        model: 'gpt-4-turbo-preview',
+                        apiKey: ''
+                    }
+                },
+                claude: {
+                    name: 'Claude (Anthropic)',
+                    type: 'claude',
+                    icon: '🧠',
+                    description: 'Anthropic 的 Claude 系列模型',
+                    vision: {
+                        enabled: true,
+                        apiEndpoint: 'https://api.anthropic.com/v1/messages',
+                        model: 'claude-3-opus-20240229',
+                        apiKey: ''
+                    },
+                    text: {
+                        enabled: true,
+                        apiEndpoint: 'https://api.anthropic.com/v1/messages',
+                        model: 'claude-3-sonnet-20240229',
+                        apiKey: ''
+                    }
+                },
+                qwen: {
+                    name: '通义千问（阿里云）',
+                    type: 'qwen',
+                    icon: '☁️',
+                    description: '阿里云的通义千问大模型',
+                    vision: {
+                        enabled: true,
+                        apiEndpoint: 'https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation',
+                        model: 'qwen-vl-plus',
+                        apiKey: ''
+                    },
+                    text: {
+                        enabled: true,
+                        apiEndpoint: 'https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation',
+                        model: 'qwen-turbo',
+                        apiKey: ''
+                    }
+                },
+                mixed: {
+                    name: '混合配置',
+                    type: 'mixed',
+                    icon: '🔀',
+                    description: '视觉和文本使用不同的模型服务',
+                    vision: {
+                        enabled: true,
+                        apiEndpoint: '',
+                        model: '',
+                        apiKey: ''
+                    },
+                    text: {
+                        enabled: true,
+                        apiEndpoint: '',
+                        model: '',
+                        apiKey: ''
+                    }
+                },
+                custom: {
+                    name: '自定义模型',
+                    type: 'custom',
+                    icon: '⚙️',
+                    description: '配置自定义的 AI 模型',
+                    vision: {
+                        enabled: false,
+                        apiEndpoint: '',
+                        model: '',
+                        apiKey: ''
+                    },
+                    text: {
+                        enabled: true,
+                        apiEndpoint: '',
+                        model: '',
+                        apiKey: ''
+                    }
+                }
+            };
+
+            const handleAddProvider = (template) => {
+                const newProvider = {
+                    id: Date.now(),
+                    ...providerTemplates[template],
+                    apiKey: '',
+                    enabled: true,
+                    createdAt: new Date().toISOString()
+                };
+                setEditingProvider(newProvider);
+                setShowAddForm(true);
+            };
+
+            const handleSaveProvider = (provider) => {
+                if (provider.id && aiProviders.find(p => p.id === provider.id)) {
+                    // 更新现有配置
+                    setAiProviders(aiProviders.map(p => p.id === provider.id ? provider : p));
+                } else {
+                    // 添加新配置
+                    setAiProviders([...aiProviders, provider]);
+                    // 如果是第一个，自动设为默认
+                    if (aiProviders.length === 0) {
+                        setSelectedProvider(provider.id);
+                    }
+                }
+                setShowAddForm(false);
+                setEditingProvider(null);
+            };
+
+            const handleDeleteProvider = (id) => {
+                if (confirm('确定要删除这个模型配置吗？')) {
+                    setAiProviders(aiProviders.filter(p => p.id !== id));
+                    if (selectedProvider === id) {
+                        setSelectedProvider(aiProviders.find(p => p.id !== id)?.id || null);
+                    }
+                }
+            };
+
+            const handleTestProvider = async (provider) => {
+                // 选择测试文本模型还是视觉模型
+                const testType = provider.text.enabled ? 'text' : (provider.vision.enabled ? 'vision' : null);
+                
+                if (!testType) {
+                    alert('该模型配置没有启用任何功能');
+                    return;
+                }
+
+                const config = testType === 'text' ? provider.text : provider.vision;
+                
+                if (!config.apiKey) {
+                    alert(`请先配置 ${testType === 'text' ? '文本' : '视觉'}模型的 API 密钥`);
+                    return;
+                }
+
+                try {
+                    let testRequest;
+                    
+                    if (provider.type === 'doubao') {
+                        testRequest = {
+                            url: config.apiEndpoint,
+                            headers: {
+                                "Content-Type": "application/json",
+                                "Authorization": `Bearer ${config.apiKey}`
+                            },
+                            body: {
+                                model: config.model,
+                                messages: [{ role: "user", content: "测试" }]
+                            }
+                        };
+                    } else if (provider.type === 'claude') {
+                        testRequest = {
+                            url: config.apiEndpoint,
+                            headers: {
+                                "Content-Type": "application/json",
+                                "x-api-key": config.apiKey,
+                                "anthropic-version": "2023-06-01"
+                            },
+                            body: {
+                                model: config.model,
+                                max_tokens: 100,
+                                messages: [{ role: "user", content: "测试" }]
+                            }
+                        };
+                    } else {
+                        // 通用测试
+                        testRequest = {
+                            url: config.apiEndpoint,
+                            headers: {
+                                "Content-Type": "application/json",
+                                "Authorization": `Bearer ${config.apiKey}`
+                            },
+                            body: {
+                                model: config.model,
+                                messages: [{ role: "user", content: "测试" }]
+                            }
+                        };
+                    }
+
+                    const response = await fetch(testRequest.url, {
+                        method: "POST",
+                        headers: testRequest.headers,
+                        body: JSON.stringify(testRequest.body)
+                    });
+
+                    const data = await response.json();
+                    
+                    if (response.ok) {
+                        alert(`✅ ${testType === 'text' ? '文本' : '视觉'}模型测试成功！连接正常。`);
+                    } else {
+                        alert('❌ 测试失败：' + (data.error?.message || data.message || '未知错误'));
+                    }
+                } catch (error) {
+                    alert('❌ 测试失败：' + error.message);
+                }
+            };
+
+            return (
+                <div className="space-y-6">
+                    {/* 页面标题 */}
+                    <div className="bg-white rounded-xl shadow-md p-6">
+                        <h1 className="text-3xl font-bold text-gray-800 mb-2">
+                            <i className="fas fa-cog text-indigo-600 mr-3"></i>
+                            系统设置
+                        </h1>
+                        <p className="text-gray-600">配置 AI 模型和密钥，支持多个模型灵活切换</p>
+                    </div>
+
+                    {/* 当前使用的模型 */}
+                    {aiProviders.length > 0 && (
+                        <div className="bg-gradient-to-r from-indigo-500 to-purple-600 rounded-xl shadow-lg p-6 text-white">
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <p className="text-indigo-100 text-sm mb-1">当前使用的 AI 模型</p>
+                                    <h2 className="text-2xl font-bold">
+                                        {aiProviders.find(p => p.id === selectedProvider)?.icon || '🤖'} 
+                                        {' '}
+                                        {aiProviders.find(p => p.id === selectedProvider)?.name || '未选择'}
+                                    </h2>
+                                </div>
+                                <i className="fas fa-check-circle text-5xl text-white opacity-30"></i>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* 已配置的模型列表 */}
+                    <div className="bg-white rounded-xl shadow-md p-6">
+                        <div className="flex items-center justify-between mb-6">
+                            <h2 className="text-xl font-bold text-gray-800">
+                                <i className="fas fa-server text-blue-600 mr-2"></i>
+                                已配置的模型 ({aiProviders.length})
+                            </h2>
+                            <button
+                                onClick={() => setShowAddForm(true)}
+                                className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+                            >
+                                <i className="fas fa-plus mr-2"></i>
+                                添加模型
+                            </button>
+                        </div>
+
+                        {aiProviders.length === 0 ? (
+                            <div className="text-center py-12">
+                                <i className="fas fa-inbox text-6xl text-gray-300 mb-4"></i>
+                                <p className="text-gray-500 mb-4">还没有配置任何 AI 模型</p>
+                                <button
+                                    onClick={() => setShowAddForm(true)}
+                                    className="px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+                                >
+                                    <i className="fas fa-plus mr-2"></i>
+                                    添加第一个模型
+                                </button>
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-1 gap-4">
+                                {aiProviders.map(provider => (
+                                    <div 
+                                        key={provider.id}
+                                        className={`border-2 rounded-xl p-5 transition-all ${
+                                            selectedProvider === provider.id
+                                                ? 'border-indigo-500 bg-indigo-50'
+                                                : 'border-gray-200 hover:border-gray-300'
+                                        }`}
+                                    >
+                                        <div className="flex items-start justify-between">
+                                            <div className="flex items-start gap-4 flex-1">
+                                                <div className="text-4xl">{provider.icon}</div>
+                                                <div className="flex-1">
+                                                    <div className="flex items-center gap-3 mb-2">
+                                                        <h3 className="text-lg font-bold text-gray-800">
+                                                            {provider.name}
+                                                        </h3>
+                                                        {selectedProvider === provider.id && (
+                                                            <span className="px-2 py-1 bg-indigo-600 text-white text-xs rounded-full">
+                                                                使用中
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    <p className="text-sm text-gray-600 mb-3">{provider.description}</p>
+                                                    <div className="space-y-2 text-xs">
+                                                        {provider.vision.enabled && (
+                                                            <div className="flex items-start gap-2 p-2 bg-purple-50 rounded">
+                                                                <i className="fas fa-image text-purple-600 mt-0.5"></i>
+                                                                <div className="flex-1">
+                                                                    <div className="font-medium text-gray-700">视觉模型</div>
+                                                                    <div className="text-gray-600">{provider.vision.model || '未配置'}</div>
+                                                                    <div className="text-gray-500 text-xs">
+                                                                        {provider.vision.apiKey ? '✓ 已配置密钥' : '✗ 未配置密钥'}
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                        {provider.text.enabled && (
+                                                            <div className="flex items-start gap-2 p-2 bg-green-50 rounded">
+                                                                <i className="fas fa-align-left text-green-600 mt-0.5"></i>
+                                                                <div className="flex-1">
+                                                                    <div className="font-medium text-gray-700">文本模型</div>
+                                                                    <div className="text-gray-600">{provider.text.model || '未配置'}</div>
+                                                                    <div className="text-gray-500 text-xs">
+                                                                        {provider.text.apiKey ? '✓ 已配置密钥' : '✗ 未配置密钥'}
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div className="flex gap-2 ml-4">
+                                                {selectedProvider !== provider.id && (
+                                                    <button
+                                                        onClick={() => setSelectedProvider(provider.id)}
+                                                        className="px-3 py-1 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm"
+                                                        title="设为默认"
+                                                    >
+                                                        <i className="fas fa-check"></i>
+                                                    </button>
+                                                )}
+                                                <button
+                                                    onClick={() => handleTestProvider(provider)}
+                                                    className="px-3 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
+                                                    title="测试连接"
+                                                >
+                                                    <i className="fas fa-vial"></i>
+                                                </button>
+                                                <button
+                                                    onClick={() => {
+                                                        setEditingProvider(provider);
+                                                        setShowAddForm(true);
+                                                    }}
+                                                    className="px-3 py-1 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 text-sm"
+                                                    title="编辑"
+                                                >
+                                                    <i className="fas fa-edit"></i>
+                                                </button>
+                                                <button
+                                                    onClick={() => handleDeleteProvider(provider.id)}
+                                                    className="px-3 py-1 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm"
+                                                    title="删除"
+                                                >
+                                                    <i className="fas fa-trash"></i>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* 添加/编辑模型表单 */}
+                    {showAddForm && (
+                        <ProviderConfigForm
+                            provider={editingProvider}
+                            templates={providerTemplates}
+                            onSave={handleSaveProvider}
+                            onClose={() => {
+                                setShowAddForm(false);
+                                setEditingProvider(null);
+                            }}
+                        />
+                    )}
+
+                    {/* 使用说明 */}
+                    <div className="bg-white rounded-xl shadow-md p-6">
+                        <h2 className="text-xl font-bold text-gray-800 mb-4">
+                            <i className="fas fa-question-circle text-orange-600 mr-2"></i>
+                            使用说明
+                        </h2>
+                        <div className="space-y-3 text-sm text-gray-700">
+                            <div className="flex items-start gap-3">
+                                <i className="fas fa-circle text-xs text-indigo-600 mt-1"></i>
+                                <p><strong>添加模型：</strong>点击"添加模型"按钮，选择预设模板或自定义配置</p>
+                            </div>
+                            <div className="flex items-start gap-3">
+                                <i className="fas fa-circle text-xs text-green-600 mt-1"></i>
+                                <p><strong>设为默认：</strong>点击模型卡片上的 ✓ 按钮，将该模型设为默认使用</p>
+                            </div>
+                            <div className="flex items-start gap-3">
+                                <i className="fas fa-circle text-xs text-blue-600 mt-1"></i>
+                                <p><strong>测试连接：</strong>配置完成后，建议使用"测试"按钮验证 API 是否正常</p>
+                            </div>
+                            <div className="flex items-start gap-3">
+                                <i className="fas fa-circle text-xs text-purple-600 mt-1"></i>
+                                <p><strong>灵活切换：</strong>可以配置多个模型，随时切换使用不同的 AI 服务</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // ==================== 模型配置表单 ====================
+        const ProviderConfigForm = ({ provider, templates, onSave, onClose }) => {
+            const [formData, setFormData] = useState(provider || {
+                id: null,
+                name: '',
+                type: '',
+                icon: '🤖',
+                description: '',
+                vision: {
+                    enabled: false,
+                    apiEndpoint: '',
+                    model: '',
+                    apiKey: ''
+                },
+                text: {
+                    enabled: true,
+                    apiEndpoint: '',
+                    model: '',
+                    apiKey: ''
+                }
+            });
+            const [showVisionKey, setShowVisionKey] = useState(false);
+            const [showTextKey, setShowTextKey] = useState(false);
+            const [selectedTemplate, setSelectedTemplate] = useState(provider?.type || '');
+
+            const handleTemplateSelect = (templateKey) => {
+                setSelectedTemplate(templateKey);
+                const template = templates[templateKey];
+                setFormData({
+                    ...formData,
+                    ...template,
+                    // 保留已输入的密钥
+                    vision: {
+                        ...template.vision,
+                        apiKey: formData.vision.apiKey
+                    },
+                    text: {
+                        ...template.text,
+                        apiKey: formData.text.apiKey
+                    }
+                });
+            };
+
+            const handleSubmit = () => {
+                if (!formData.name) {
+                    alert('请填写模型名称');
+                    return;
+                }
+                
+                if (formData.vision.enabled && (!formData.vision.apiEndpoint || !formData.vision.model)) {
+                    alert('请完整配置视觉模型信息');
+                    return;
+                }
+                
+                if (formData.text.enabled && (!formData.text.apiEndpoint || !formData.text.model)) {
+                    alert('请完整配置文本模型信息');
+                    return;
+                }
+                
+                const savedData = {
+                    ...formData,
+                    id: formData.id || Date.now(),
+                    createdAt: formData.createdAt || new Date().toISOString()
+                };
+                
+                onSave(savedData);
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+                        <div className="p-6">
+                            <div className="flex items-center justify-between mb-6">
+                                <h2 className="text-2xl font-bold text-gray-800">
+                                    <i className="fas fa-plus-circle text-indigo-600 mr-2"></i>
+                                    {provider?.id ? '编辑模型配置' : '添加 AI 模型'}
+                                </h2>
+                                <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl">
+                                    <i className="fas fa-times"></i>
+                                </button>
+                            </div>
+
+                            {/* 模板选择 */}
+                            {!provider?.id && (
+                                <div className="mb-6">
+                                    <label className="block text-sm font-medium text-gray-700 mb-3">
+                                        选择模型模板
+                                    </label>
+                                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                                        {Object.entries(templates).map(([key, template]) => (
+                                            <button
+                                                key={key}
+                                                onClick={() => handleTemplateSelect(key)}
+                                                className={`p-4 border-2 rounded-lg text-left transition-all ${
+                                                    selectedTemplate === key
+                                                        ? 'border-indigo-500 bg-indigo-50'
+                                                        : 'border-gray-200 hover:border-gray-300'
+                                                }`}
+                                            >
+                                                <div className="text-3xl mb-2">{template.icon}</div>
+                                                <div className="font-medium text-gray-800 text-sm">{template.name}</div>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* 基本信息 */}
+                            <div className="space-y-4 mb-6">
+                                <h3 className="font-bold text-gray-800 border-b pb-2">基本信息</h3>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                                            模型名称 *
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={formData.name}
+                                            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                            placeholder="例如：豆包大模型"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                                            图标
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={formData.icon}
+                                            onChange={(e) => setFormData({ ...formData, icon: e.target.value })}
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                            placeholder="🤖"
+                                        />
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                                        描述
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={formData.description}
+                                        onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                        placeholder="简单描述这个模型"
+                                    />
+                                </div>
+                            </div>
+
+                            {/* 视觉模型配置 */}
+                            <div className="space-y-4 mb-6 p-4 bg-purple-50 rounded-lg">
+                                <div className="flex items-center justify-between">
+                                    <h3 className="font-bold text-gray-800">
+                                        <i className="fas fa-image text-purple-600 mr-2"></i>
+                                        视觉模型配置（用于素材分析）
+                                    </h3>
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={formData.vision.enabled}
+                                            onChange={(e) => setFormData({
+                                                ...formData,
+                                                vision: { ...formData.vision, enabled: e.target.checked }
+                                            })}
+                                            className="w-4 h-4"
+                                        />
+                                        <span className="text-sm text-gray-700">启用</span>
+                                    </label>
+                                </div>
+
+                                {formData.vision.enabled && (
+                                    <div className="space-y-3">
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                                API 端点 *
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={formData.vision.apiEndpoint}
+                                                onChange={(e) => setFormData({
+                                                    ...formData,
+                                                    vision: { ...formData.vision, apiEndpoint: e.target.value }
+                                                })}
+                                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                                placeholder="https://api.example.com/v1/chat/completions"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                                模型 ID *
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={formData.vision.model}
+                                                onChange={(e) => setFormData({
+                                                    ...formData,
+                                                    vision: { ...formData.vision, model: e.target.value }
+                                                })}
+                                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                                placeholder="gpt-4-vision-preview"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                                API 密钥 *
+                                            </label>
+                                            <div className="relative">
+                                                <input
+                                                    type={showVisionKey ? "text" : "password"}
+                                                    value={formData.vision.apiKey}
+                                                    onChange={(e) => setFormData({
+                                                        ...formData,
+                                                        vision: { ...formData.vision, apiKey: e.target.value }
+                                                    })}
+                                                    className="w-full px-3 py-2 pr-12 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                                    placeholder="sk-xxxxxx"
+                                                />
+                                                <button
+                                                    onClick={() => setShowVisionKey(!showVisionKey)}
+                                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                                                >
+                                                    <i className={`fas ${showVisionKey ? 'fa-eye-slash' : 'fa-eye'}`}></i>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* 文本模型配置 */}
+                            <div className="space-y-4 mb-6 p-4 bg-green-50 rounded-lg">
+                                <div className="flex items-center justify-between">
+                                    <h3 className="font-bold text-gray-800">
+                                        <i className="fas fa-align-left text-green-600 mr-2"></i>
+                                        文本模型配置（用于智能检索）
+                                    </h3>
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={formData.text.enabled}
+                                            onChange={(e) => setFormData({
+                                                ...formData,
+                                                text: { ...formData.text, enabled: e.target.checked }
+                                            })}
+                                            className="w-4 h-4"
+                                        />
+                                        <span className="text-sm text-gray-700">启用</span>
+                                    </label>
+                                </div>
+
+                                {formData.text.enabled && (
+                                    <div className="space-y-3">
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                                API 端点 *
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={formData.text.apiEndpoint}
+                                                onChange={(e) => setFormData({
+                                                    ...formData,
+                                                    text: { ...formData.text, apiEndpoint: e.target.value }
+                                                })}
+                                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                                placeholder="https://api.example.com/v1/chat/completions"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                                模型 ID *
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={formData.text.model}
+                                                onChange={(e) => setFormData({
+                                                    ...formData,
+                                                    text: { ...formData.text, model: e.target.value }
+                                                })}
+                                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                                placeholder="gpt-4-turbo"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                                API 密钥 *
+                                            </label>
+                                            <div className="relative">
+                                                <input
+                                                    type={showTextKey ? "text" : "password"}
+                                                    value={formData.text.apiKey}
+                                                    onChange={(e) => setFormData({
+                                                        ...formData,
+                                                        text: { ...formData.text, apiKey: e.target.value }
+                                                    })}
+                                                    className="w-full px-3 py-2 pr-12 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                                    placeholder="sk-xxxxxx"
+                                                />
+                                                <button
+                                                    onClick={() => setShowTextKey(!showTextKey)}
+                                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                                                >
+                                                    <i className={`fas ${showTextKey ? 'fa-eye-slash' : 'fa-eye'}`}></i>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+                                <p className="text-xs text-blue-800">
+                                    <i className="fas fa-info-circle mr-1"></i>
+                                    <strong>提示：</strong>如果视觉和文本使用相同的服务和密钥，可以填写相同的配置；如果使用不同服务，请分别配置。
+                                </p>
+                            </div>
+
+                            {/* 操作按钮 */}
+                            <div className="flex gap-3 justify-end mt-6">
+                                <button
+                                    onClick={onClose}
+                                    className="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
+                                >
+                                    取消
+                                </button>
+                                <button
+                                    onClick={handleSubmit}
+                                    className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+                                >
+                                    <i className="fas fa-save mr-2"></i>
+                                    保存配置
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // ==================== 统计卡片组件 ====================
+        const StatCard = ({ icon, title, value, color }) => {
+            const colors = {
+                blue: 'from-blue-500 to-blue-600',
+                red: 'from-red-500 to-red-600',
+                green: 'from-green-500 to-green-600',
+                yellow: 'from-yellow-500 to-yellow-600',
+                purple: 'from-purple-500 to-purple-600',
+                orange: 'from-orange-500 to-orange-600'
+            };
+
+            return (
+                <div className={`bg-gradient-to-br ${colors[color]} rounded-xl shadow-lg p-6 text-white`}>
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <p className="text-white text-opacity-90 text-sm mb-1">{title}</p>
+                            <p className="text-3xl font-bold">{value}</p>
+                        </div>
+                        <i className={`fas ${icon} text-4xl text-white text-opacity-30`}></i>
+                    </div>
+                </div>
+            );
+        };
+
+        // ==================== 底部信息 ====================
+        const Footer = ({ materials, topics, videos }) => {
+            const exportData = async () => {
+                const data = {
+                    materials,
+                    topics,
+                    videos,
+                    exportDate: new Date().toISOString()
+                };
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `content-system-backup-${new Date().toISOString().split('T')[0]}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+            };
+
+            const importData = (event) => {
+                const file = event.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = async (e) => {
+                        try {
+                            const data = JSON.parse(e.target.result);
+                            if (confirm('确定要导入数据吗？这将覆盖当前所有数据！')) {
+                                await window.storage.set('materials_v2', JSON.stringify(data.materials || []), false);
+                                await window.storage.set('topics_v2', JSON.stringify(data.topics || []), false);
+                                await window.storage.set('videos_v2', JSON.stringify(data.videos || []), false);
+                                window.location.reload();
+                            }
+                        } catch (error) {
+                            alert('导入失败，文件格式错误！');
+                        }
+                    };
+                    reader.readAsText(file);
+                }
+            };
+
+            return (
+                <footer className="bg-white border-t mt-12 py-6">
+                    <div className="container mx-auto px-4">
+                        <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+                            <div className="text-gray-600 text-sm">
+                                <p>
+                                    <i className="fas fa-database mr-2"></i>
+                                    数据统计：{materials.length} 个素材 · {topics.length} 个选题 · {videos.length} 个视频
+                                </p>
+                            </div>
+                            <div className="flex gap-3">
+                                <button
+                                    onClick={exportData}
+                                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm"
+                                >
+                                    <i className="fas fa-download mr-2"></i>导出数据
+                                </button>
+                                <label className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer text-sm">
+                                    <i className="fas fa-upload mr-2"></i>导入数据
+                                    <input
+                                        type="file"
+                                        accept=".json"
+                                        onChange={importData}
+                                        className="hidden"
+                                    />
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </footer>
+            );
+        };
+
+        // ==================== 渲染应用 ====================
+        ReactDOM.render(<ContentProductionApp />, document.getElementById('root'));
+    </script>
+</body>
+</html>

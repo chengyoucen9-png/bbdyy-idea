@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  # MySQL数据库
+  mysql:
+    image: mysql:8.0
+    container_name: video-mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: root123456
+      MYSQL_DATABASE: video_production_db
+      MYSQL_USER: video_user
+      MYSQL_PASSWORD: video_pass
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    command: --default-authentication-plugin=mysql_native_password
+
+  # Redis缓存
+  redis:
+    image: redis:7-alpine
+    container_name: video-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+
+  # 后端API
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: video-api
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USERNAME: video_user
+      DB_PASSWORD: video_pass
+      DB_DATABASE: video_production_db
+      JWT_SECRET: your-production-secret-key
+    depends_on:
+      - mysql
+      - redis
+    volumes:
+      - ./backend/.env:/app/.env
+
+  # Nginx前端
+  frontend:
+    build:
+      context: ./frontend-react
+      dockerfile: Dockerfile
+    container_name: video-frontend
+    restart: always
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+
+volumes:
+  mysql-data:
+  redis-data:
