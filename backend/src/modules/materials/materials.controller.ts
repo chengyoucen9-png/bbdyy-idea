@@ -57,7 +57,9 @@ export class MaterialsController {
 
   @Post('upload')
   @ApiOperation({ summary: '上传素材文件（音视频自动转写）' })
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(FileInterceptor('file', {
+    limits: { fileSize: 100 * 1024 * 1024 } // 100MB
+  }))
   async uploadFile(
     @Request() req,
     @UploadedFile() file: Express.Multer.File,
