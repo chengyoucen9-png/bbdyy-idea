@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Like } from 'typeorm';
-import { Material } from './material.entity';
+import { Material, FileType } from './material.entity';
 import { CreateMaterialDto } from './dto/create-material.dto';
 import { UpdateMaterialDto } from './dto/update-material.dto';
 import { QueryMaterialDto } from './dto/query-material.dto';
@@ -55,8 +55,14 @@ export class MaterialsService {
 
   async create(userId: number, createMaterialDto: CreateMaterialDto) {
     const material = this.materialsRepository.create({
-      ...createMaterialDto,
       userId,
+      name: createMaterialDto.name,
+      scene: createMaterialDto.scene,
+      tags: createMaterialDto.tags,
+      thumbnail: createMaterialDto.thumbnail,
+      fileSize: createMaterialDto.fileSize,
+      note: createMaterialDto.note,
+      fileType: createMaterialDto.fileType as any,
     });
 
     return this.materialsRepository.save(material);
@@ -89,10 +95,10 @@ export class MaterialsService {
     const [total, imageCount, videoCount] = await Promise.all([
       this.materialsRepository.count({ where: { userId } }),
       this.materialsRepository.count({
-        where: { userId, fileType: 'image' },
+        where: { userId, fileType: FileType.IMAGE },
       }),
       this.materialsRepository.count({
-        where: { userId, fileType: 'video' },
+        where: { userId, fileType: FileType.VIDEO },
       }),
     ]);
 

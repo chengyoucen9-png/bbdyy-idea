@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Topic } from './topic.entity';
+import { Topic, TopicStatus } from './topic.entity';
 import { CreateTopicDto } from './dto';
 
 @Injectable()
@@ -49,9 +49,9 @@ export class TopicsService {
   async getStatistics(userId: number) {
     const [total, pending, inProgress, completed] = await Promise.all([
       this.topicsRepository.count({ where: { userId } }),
-      this.topicsRepository.count({ where: { userId, status: 'pending' } }),
-      this.topicsRepository.count({ where: { userId, status: 'inProgress' } }),
-      this.topicsRepository.count({ where: { userId, status: 'completed' } }),
+      this.topicsRepository.count({ where: { userId, status: TopicStatus.PENDING } }),
+      this.topicsRepository.count({ where: { userId, status: TopicStatus.IN_PROGRESS } }),
+      this.topicsRepository.count({ where: { userId, status: TopicStatus.COMPLETED } }),
     ]);
 
     return {
