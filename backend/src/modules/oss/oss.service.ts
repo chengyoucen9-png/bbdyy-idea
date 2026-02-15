@@ -11,7 +11,6 @@ export class OssService {
     const accessKeyId = configService.get('OSS_ACCESS_KEY_ID');
     const accessKeySecret = configService.get('OSS_ACCESS_KEY_SECRET');
     
-    // 只有配置了密钥才初始化OSS
     if (accessKeyId && accessKeySecret) {
       this.client = new OSS({
         region: configService.get('OSS_REGION'),
@@ -28,10 +27,11 @@ export class OssService {
 
   async uploadFile(file: Express.Multer.File, folder: string = 'uploads') {
     if (!this.enabled || !this.client) {
-      // 如果OSS未配置，返回模拟数据
+      // OSS未配置，返回本地URL
+      const filename = `${Date.now()}-${file.originalname}`;
       return {
-        url: `http://localhost:3000/uploads/${file.originalname}`,
-        name: file.originalname,
+        url: `http://localhost:3000/uploads/${filename}`,
+        name: filename,
       };
     }
 
