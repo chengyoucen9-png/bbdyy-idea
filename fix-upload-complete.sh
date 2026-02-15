@@ -1,3 +1,11 @@
+#!/bin/bash
+
+echo "🔧 开始修复上传功能..."
+
+# 1. 修复materials.controller.ts - 简化上传逻辑，去掉可能失败的转写
+cd /workspaces/bbdyy-idea/backend/src/modules/materials
+
+cat > materials.controller.ts.new << 'EOFCTRL'
 import {
   Controller,
   Get,
@@ -147,3 +155,14 @@ export class MaterialsController {
     return this.materialsService.markAsUsed(id, req.user.id);
   }
 }
+EOFCTRL
+
+mv materials.controller.ts.new materials.controller.ts
+echo "✅ 修复了materials.controller.ts"
+
+cd /workspaces/bbdyy-idea
+git add .
+git commit -m "🔧 修复上传功能 - 简化逻辑，增加错误日志，分离转写步骤"
+git push origin main
+
+echo "✅ 修复完成！后端将自动重启..."
