@@ -5,8 +5,8 @@ WORKDIR /app
 # 复制package文件
 COPY package*.json ./
 
-# 安装依赖
-RUN npm ci --only=production
+# 安装全部依赖（含 devDependencies，构建阶段需要 @nestjs/cli）
+RUN npm ci
 
 # 复制源代码
 COPY . .
