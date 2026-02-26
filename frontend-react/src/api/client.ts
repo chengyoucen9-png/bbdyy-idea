@@ -82,14 +82,10 @@ export const videosAPI = {
   getStats: () => api.get('/videos/stats/summary'),
 };
 
-// AI配置API
-export const aiProvidersAPI = {
-  getList: () => api.get('/ai-providers'),
-  getDefault: () => api.get('/ai-providers/default'),
-  create: (data: any) => api.post('/ai-providers', data),
-  update: (id: number, data: any) => api.put(`/ai-providers/${id}`, data),
-  setDefault: (id: number) => api.patch(`/ai-providers/${id}/set-default`),
-  delete: (id: number) => api.delete(`/ai-providers/${id}`),
+// 系统配置API
+export const settingsAPI = {
+  getAll: () => api.get('/settings'),
+  update: (updates: Record<string, string>) => api.put('/settings', { updates }),
 };
 
 export default api;

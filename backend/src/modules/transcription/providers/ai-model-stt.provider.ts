@@ -22,9 +22,9 @@ export class AIModelSTTProvider implements ITranscriptionProvider {
       // 示例使用通义千问的音频理解能力
       
       const response = await axios.post(
-        'https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation',
+        process.env.AI_VISION_ENDPOINT || 'https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation',
         {
-          model: 'qwen-audio-turbo',
+          model: process.env.AI_TRANSCRIPTION_MODEL || 'qwen-audio-turbo',
           input: {
             messages: [
               {
