@@ -39,17 +39,29 @@ services:
       - "3000:3000"
     environment:
       NODE_ENV: production
+      PORT: 3000
+      API_PREFIX: /api
       DB_HOST: mysql
       DB_PORT: 3306
       DB_USERNAME: video_user
       DB_PASSWORD: video_pass
       DB_DATABASE: video_production_db
-      JWT_SECRET: your-production-secret-key
+      JWT_SECRET: your-production-secret-key-change-this
+      JWT_EXPIRES_IN: 7d
+      CORS_ORIGIN: "*"
+      MAX_FILE_SIZE: 104857600
+      LOG_LEVEL: warn
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+      OSS_REGION: ${OSS_REGION:-oss-cn-hangzhou}
+      OSS_ACCESS_KEY_ID: ${OSS_ACCESS_KEY_ID:-}
+      OSS_ACCESS_KEY_SECRET: ${OSS_ACCESS_KEY_SECRET:-}
+      OSS_BUCKET: ${OSS_BUCKET:-}
+      OSS_ENDPOINT: ${OSS_ENDPOINT:-https://oss-cn-hangzhou.aliyuncs.com}
     depends_on:
       - mysql
       - redis
     volumes:
-      - ./backend/.env:/app/.env
+      - uploads-data:/app/uploads
 
   # Nginx前端
   frontend:
@@ -62,7 +74,10 @@ services:
       - "80:80"
     depends_on:
       - api
+    volumes:
+      - uploads-data:/app/uploads
 
 volumes:
   mysql-data:
   redis-data:
+  uploads-data:

@@ -1,42 +1,48 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as OSS from 'ali-oss';
+import * as fs from 'fs';
+import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 
 @Injectable()
 export class OssService {
-  private client: OSS;
+  private uploadDir: string;
 
   constructor(private configService: ConfigService) {
-    this.client = new OSS({
-      region: this.configService.get('OSS_REGION'),
-      accessKeyId: this.configService.get('OSS_ACCESS_KEY_ID'),
-      accessKeySecret: this.configService.get('OSS_ACCESS_KEY_SECRET'),
-      bucket: this.configService.get('OSS_BUCKET'),
-    });
+    this.uploadDir = path.join(process.cwd(), 'uploads');
+    if (!fs.existsSync(this.uploadDir)) {
+      fs.mkdirSync(this.uploadDir, { recursive: true });
+    }
   }
 
   async uploadFile(file: Express.Multer.File, folder = 'materials') {
     const ext = file.originalname.split('.').pop();
-    const filename = `${folder}/${Date.now()}-${uuidv4()}.${ext}`;
+    const filename = `${Date.now()}-${uuidv4()}.${ext}`;
+    const folderPath = path.join(this.uploadDir, folder);
 
-    const result = await this.client.put(filename, file.buffer);
+    if (!fs.existsSync(folderPath)) {
+      fs.mkdirSync(folderPath, { recursive: true });
+    }
+
+    const filePath = path.join(folderPath, filename);
+    fs.writeFileSync(filePath, file.buffer);
 
     return {
-      url: result.url,
-      name: result.name,
+      url: `/uploads/${folder}/${filename}`,
+      name: `${folder}/${filename}`,
       size: file.size,
     };
   }
 
   async deleteFile(filename: string) {
-    await this.client.delete(filename);
+    const filePath = path.join(this.uploadDir, filename);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
     return { message: '删除成功' };
   }
 
   getPublicUrl(filename: string) {
-    const endpoint = this.configService.get('OSS_ENDPOINT');
-    const bucket = this.configService.get('OSS_BUCKET');
-    return `https://${bucket}.${endpoint}/${filename}`;
+    return `/uploads/${filename}`;
   }
 }

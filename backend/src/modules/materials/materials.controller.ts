@@ -43,6 +43,34 @@ export class MaterialsController {
     return this.materialsService.getStatistics(req.user.id);
   }
 
+  /**
+   * 根据关键词搜索匹配素材（供选题页AI推荐用，不需要topicId）
+   * POST /materials/search-by-keywords
+   * body: { keywords: string[] } 或 { text: string }
+   */
+  @Post('search-by-keywords')
+  @ApiOperation({ summary: '按关键词匹配素材' })
+  async searchByKeywords(
+    @Request() req,
+    @Body() body: { keywords?: string[]; text?: string },
+  ) {
+    let keywords: string[] = [];
+
+    if (body.keywords && body.keywords.length > 0) {
+      keywords = body.keywords;
+    } else if (body.text) {
+      // 简单分词：按标点、空格切割，过滤掉1字以下的
+      keywords = body.text
+        .split(/[\s，。！？、；：""''【】《》\n,!?.;:]+/)
+        .map((s) => s.trim())
+        .filter((s) => s.length >= 2)
+        .slice(0, 20);
+    }
+
+    const materials = await this.materialsService.searchByKeywords(req.user.id, keywords);
+    return { materials, keywords };
+  }
+
   @Get(':id')
   @ApiOperation({ summary: '获取单个素材' })
   async findOne(@Request() req, @Param('id') id: number) {
@@ -63,18 +91,19 @@ export class MaterialsController {
     @UploadedFile() file: Express.Multer.File,
     @Body() dto: any,
   ) {
-    // 1. 上传文件到OSS
-    const uploadResult = await this.ossService.uploadFile(file, 'materials');
+    const filename = dto.name || file.originalname;
+    const existing = await this.materialsService.findDuplicate(req.user.id, filename, file.size);
+    if (existing) return existing;
 
-    // 2. 判断文件类型
+    const uploadResult = await this.ossService.uploadFile(file, 'materials');
+    const fileUrl = uploadResult.url;
     const fileType = this.getFileType(file.mimetype);
 
-    // 3. 如果是音频或视频，自动转写
     let transcriptionText = null;
     if (fileType === 'audio' || fileType === 'video') {
       try {
         const transcriptResult = await this.transcriptionService.transcribe({
-          fileUrl: uploadResult.url,
+          fileUrl,
           fileType: fileType as 'audio' | 'video',
           language: 'zh-CN',
           enablePunctuation: true,
@@ -85,62 +114,122 @@ export class MaterialsController {
       }
     }
 
-    // 4. 创建素材记录
+    // AI 提炼标签和场景
+    let tags: string[] = [];
+    let scene = dto.scene || '';
+    if (transcriptionText) {
+      try {
+        const axios = require('axios');
+        const aiRes = await axios.default.post(
+          process.env.AI_TEXT_ENDPOINT || 'https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation',
+          {
+            model: process.env.AI_TEXT_MODEL || 'qwen-turbo',
+            input: {
+              messages: [{
+                role: 'user',
+                content: `请根据以下视频转写文本，提炼3-6个简短标签（每个标签2-6个字），以及一句话场景描述（不超过20字）。\n返回格式为JSON：{tags: [标签1, 标签2, ...], scene: 场景描述}\n只返回JSON，不要其他内容。\n\n转写文本：${transcriptionText.substring(0, 500)}`
+              }]
+            }
+          },
+          {
+            headers: { 'Authorization': 'Bearer ' + process.env.DASHSCOPE_API_KEY, 'Content-Type': 'application/json' },
+            timeout: 30000,
+          }
+        );
+        const aiText = aiRes.data?.output?.text || '';
+        const cleaned = aiText.replace(/```json|```/g, '').trim();
+        const parsed = JSON.parse(cleaned);
+        tags = parsed.tags || [];
+        scene = parsed.scene || transcriptionText.substring(0, 20);
+      } catch {
+        scene = transcriptionText.substring(0, 20);
+      }
+    } else if (fileType === 'image') {
+      try {
+        const axios = require('axios');
+        const base64Image = file.buffer.toString('base64');
+        const aiRes = await axios.default.post(
+          process.env.AI_VISION_ENDPOINT || 'https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation',
+          {
+            model: process.env.AI_VISION_MODEL || 'qwen-vl-plus',
+            input: {
+              messages: [{
+                role: 'user',
+                content: [
+                  { image: `data:${file.mimetype};base64,${base64Image}` },
+                  { text: '请分析这张图片，提炼3-6个简短标签（每个2-6字），以及一句话场景描述（不超过20字）。返回格式为JSON：{"tags":["标签1","标签2"],"scene":"场景描述"}，只返回JSON，不要其他内容。' },
+                ],
+              }],
+            },
+          },
+          {
+            headers: { 'Authorization': 'Bearer ' + process.env.DASHSCOPE_API_KEY, 'Content-Type': 'application/json' },
+            timeout: 30000,
+          }
+        );
+        const aiText = aiRes.data?.output?.choices?.[0]?.message?.content?.[0]?.text || '';
+        const cleaned = aiText.replace(/```json|```/g, '').trim();
+        const parsed = JSON.parse(cleaned);
+        tags = parsed.tags || [];
+        scene = parsed.scene || dto.scene || '';
+      } catch (error) {
+        console.error('图片AI分析失败:', error.message);
+      }
+    }
+
     return this.materialsService.create(req.user.id, {
-      name: dto.name || file.originalname,
-      scene: dto.scene || transcriptionText || '',
-      tags: dto.tags ? JSON.parse(dto.tags) : [],
-      thumbnail: uploadResult.url,
-      fileType,
+      name: filename,
+      scene,
+      tags,
+      thumbnail: fileUrl,
+      fileType: fileType as any,
       fileSize: file.size,
       note: transcriptionText || dto.note || '',
     });
   }
 
   @Put(':id')
-  @ApiOperation({ summary: '更新素材' })
-  async update(
-    @Request() req,
-    @Param('id') id: number,
-    @Body() updateMaterialDto: UpdateMaterialDto,
-  ) {
+  async update(@Request() req, @Param('id') id: number, @Body() updateMaterialDto: UpdateMaterialDto) {
     return this.materialsService.update(req.user.id, id, updateMaterialDto);
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: '删除素材' })
   async remove(@Request() req, @Param('id') id: number) {
     return this.materialsService.remove(req.user.id, id);
   }
 
   @Post(':id/mark-used')
-  @ApiOperation({ summary: '标记素材已使用' })
   async markAsUsed(@Request() req, @Param('id') id: number) {
     return this.materialsService.markAsUsed(req.user.id, id);
   }
 
   @Post(':id/transcribe')
-  @ApiOperation({ summary: '手动转写素材' })
   async transcribeMaterial(@Request() req, @Param('id') id: number) {
     const material = await this.materialsService.findOne(req.user.id, id);
-    
-    if (!material.thumbnail) {
-      throw new Error('素材没有关联文件');
-    }
+    const fileUrl = (material as any).ossUrl || material.thumbnail;
+    if (!fileUrl) throw new Error('素材没有关联文件');
 
     const result = await this.transcriptionService.transcribe({
-      fileUrl: material.thumbnail,
+      fileUrl,
       fileType: material.fileType as 'audio' | 'video',
       language: 'zh-CN',
       enablePunctuation: true,
     });
 
-    await this.materialsService.update(req.user.id, id, {
-      note: result.text,
-      scene: result.text.substring(0, 100),
-    });
+    let tags: string[] = [], scene = '';
+    try {
+      const axios = require('axios');
+      const aiRes = await axios.default.post(
+        process.env.AI_TEXT_ENDPOINT || 'https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation',
+        { model: process.env.AI_TEXT_MODEL || 'qwen-turbo', input: { messages: [{ role: 'user', content: `提炼标签和场景。返回JSON：{tags:[],scene:""}。转写：${result.text.substring(0, 500)}` }] } },
+        { headers: { 'Authorization': 'Bearer ' + process.env.DASHSCOPE_API_KEY, 'Content-Type': 'application/json' }, timeout: 30000 }
+      );
+      const parsed = JSON.parse((aiRes.data?.output?.text || '').replace(/```json|```/g, '').trim());
+      tags = parsed.tags || []; scene = parsed.scene || '';
+    } catch { scene = result.text.substring(0, 20); }
 
-    return result;
+    await this.materialsService.update(req.user.id, id, { note: result.text, tags, scene });
+    return { ...result, tags, scene };
   }
 
   private getFileType(mimetype: string): string {

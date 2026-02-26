@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsEnum, IsNumber, Min, Max } from 'class-validator';
+import { IsString, IsOptional, IsEnum, IsNumber, IsArray, Min, Max } from 'class-validator';
 import { TopicStatus, TopicPriority } from '../topic.entity';
 
 export class CreateTopicDto {
@@ -8,6 +8,10 @@ export class CreateTopicDto {
   @IsString()
   @IsOptional()
   description?: string;
+
+  @IsString()
+  @IsOptional()
+  finalDraft?: string;
 
   @IsString()
   @IsOptional()
@@ -26,6 +30,26 @@ export class CreateTopicDto {
   @Max(3)
   @IsOptional()
   difficulty?: number;
+
+  @IsString()
+  @IsOptional()
+  contentType?: string;
+
+  @IsString()
+  @IsOptional()
+  script?: string;
+
+  @IsArray()
+  @IsOptional()
+  titles?: string[];
+
+  @IsString()
+  @IsOptional()
+  platform?: string;
+
+  @IsArray()
+  @IsOptional()
+  relatedMaterials?: number[];
 }
 
 export class UpdateTopicDto {
@@ -39,6 +63,10 @@ export class UpdateTopicDto {
 
   @IsString()
   @IsOptional()
+  finalDraft?: string;
+
+  @IsString()
+  @IsOptional()
   source?: string;
 
   @IsEnum(TopicStatus)
@@ -54,4 +82,24 @@ export class UpdateTopicDto {
   @Max(3)
   @IsOptional()
   difficulty?: number;
+
+  @IsString()
+  @IsOptional()
+  contentType?: string;
+
+  @IsString()
+  @IsOptional()
+  script?: string;
+
+  @IsArray()
+  @IsOptional()
+  titles?: string[];
+
+  @IsString()
+  @IsOptional()
+  platform?: string;
+
+  @IsArray()
+  @IsOptional()
+  relatedMaterials?: number[];
 }

@@ -12,6 +12,7 @@ import { OssModule } from './modules/oss/oss.module';
 import { HealthModule } from './modules/health/health.module';
 import { TranscriptionModule } from './modules/transcription/transcription.module';
 import { MediaModule } from './modules/media/media.module';
+import { SettingsModule } from './modules/settings/settings.module';
 
 @Module({
   imports: [
@@ -60,6 +61,7 @@ import { MediaModule } from './modules/media/media.module';
     HealthModule,
     TranscriptionModule,
     MediaModule,
+    SettingsModule,
   ],
 })
 export class AppModule {}

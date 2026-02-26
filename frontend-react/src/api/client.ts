@@ -5,25 +5,17 @@ const api = axios.create({
   timeout: 15000,
 });
 
-// 请求拦截器 - 添加Token
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('access_token');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
+    if (token) config.headers.Authorization = `Bearer ${token}`;
     return config;
   },
-  (error) => {
-    return Promise.reject(error);
-  }
+  (error) => Promise.reject(error)
 );
 
-// 响应拦截器 - 处理错误
 api.interceptors.response.use(
-  (response) => {
-    return response.data.data || response.data;
-  },
+  (response) => response.data.data || response.data,
   (error) => {
     if (error.response?.status === 401) {
       localStorage.removeItem('access_token');
@@ -33,15 +25,12 @@ api.interceptors.response.use(
   }
 );
 
-// 认证API
 export const authAPI = {
-  login: (data: { username: string; password: string }) =>
-    api.post('/auth/login', data),
+  login: (data: { username: string; password: string }) => api.post('/auth/login', data),
   register: (data: any) => api.post('/auth/register', data),
   getProfile: () => api.get('/auth/profile'),
 };
 
-// 素材API
 export const materialsAPI = {
   getList: (params?: any) => api.get('/materials', { params }),
   getOne: (id: number) => api.get(`/materials/${id}`),
@@ -51,18 +40,15 @@ export const materialsAPI = {
   upload: (file: File, data?: any) => {
     const formData = new FormData();
     formData.append('file', file);
-    if (data) {
-      Object.keys(data).forEach(key => {
-        formData.append(key, data[key]);
-      });
-    }
+    if (data) Object.keys(data).forEach(key => formData.append(key, data[key]));
     return api.post('/materials/upload', formData);
   },
   transcribe: (id: number) => api.post(`/materials/${id}/transcribe`),
   getStats: () => api.get('/materials/stats/summary'),
+  // 按关键词/文本匹配素材（不需要 topicId）
+  searchByKeywords: (text: string) => api.post('/materials/search-by-keywords', { text }),
 };
 
-// 选题API
 export const topicsAPI = {
   getList: () => api.get('/topics'),
   getOne: (id: number) => api.get(`/topics/${id}`),
@@ -70,9 +56,12 @@ export const topicsAPI = {
   update: (id: number, data: any) => api.put(`/topics/${id}`, data),
   delete: (id: number) => api.delete(`/topics/${id}`),
   getStats: () => api.get('/topics/stats/summary'),
+  searchMaterials: (id: number) => api.post(`/topics/${id}/search-materials`),
+  generateScript: (id: number, materialIds?: number[]) => api.post(`/topics/${id}/generate-script`, { materialIds }),
+  generateTitles: (id: number, platform?: string) => api.post(`/topics/${id}/generate-titles`, { platform }),
+  optimizeOpening: (id: number) => api.post(`/topics/${id}/optimize-opening`),
 };
 
-// 视频API
 export const videosAPI = {
   getList: () => api.get('/videos'),
   getOne: (id: number) => api.get(`/videos/${id}`),
@@ -82,14 +71,24 @@ export const videosAPI = {
   getStats: () => api.get('/videos/stats/summary'),
 };
 
-// AI配置API
-export const aiProvidersAPI = {
-  getList: () => api.get('/ai-providers'),
-  getDefault: () => api.get('/ai-providers/default'),
-  create: (data: any) => api.post('/ai-providers', data),
-  update: (id: number, data: any) => api.put(`/ai-providers/${id}`, data),
-  setDefault: (id: number) => api.patch(`/ai-providers/${id}/set-default`),
-  delete: (id: number) => api.delete(`/ai-providers/${id}`),
+
+export const settingsAPI = {
+  getAll: () => api.get('/settings'),
+  update: (updates: Record<string, string>) => api.put('/settings', { updates }),
+};
+
+export const usersAPI = {
+  getList: () => api.get('/users'),
+  create: (data: any) => api.post('/users', data),
+  update: (id: number, data: any) => api.put(`/users/${id}`, data),
+  delete: (id: number) => api.delete(`/users/${id}`),
+  toggleStatus: (id: number) => api.patch(`/users/${id}/toggle-status`),
+  loginAs: (id: number) => api.post(`/users/${id}/login-as`),
+};
+
+export const chatAPI = {
+  send: (model: string, messages: { role: string; content: string }[]) =>
+    api.post('/chat/send', { model, messages }),
 };
 
 export default api;

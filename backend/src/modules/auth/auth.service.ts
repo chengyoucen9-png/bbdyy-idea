@@ -70,6 +70,10 @@ export class AuthService {
     return this.usersRepository.findOne({ where: { id: userId } });
   }
 
+  async generateTokenForUser(user: User) {
+    return this.generateToken(user);
+  }
+
   private generateToken(user: User) {
     const payload = { sub: user.id, username: user.username };
     return {

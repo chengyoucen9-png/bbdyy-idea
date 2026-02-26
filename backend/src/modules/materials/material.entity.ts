@@ -12,6 +12,7 @@ import { User } from '../users/user.entity';
 export enum FileType {
   IMAGE = 'image',
   VIDEO = 'video',
+  AUDIO = 'audio',
 }
 
 @Entity('materials')
@@ -36,6 +37,9 @@ export class Material {
 
   @Column({ type: 'text', nullable: true })
   note: string;
+
+  @Column({ name: 'oss_url', length: 1000, nullable: true })
+  ossUrl: string;
 
   @Column({ length: 500, nullable: true })
   thumbnail: string;
@@ -63,7 +67,6 @@ export class Material {
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt: Date;
 
-  // 关联用户
   @ManyToOne(() => User, (user) => user.materials, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'user_id' })
   user: User;

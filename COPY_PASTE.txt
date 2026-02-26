@@ -1,0 +1,35 @@
+============ 🚀 立即在服务器终端执行 ============
+
+【复制下面整个块，粘贴到您的服务器终端，然后按 Enter】
+
+---
+
+sudo mkdir -p /etc/docker && sudo cat > /etc/docker/daemon.json << 'EOF'
+{
+  "registry-mirrors": [
+    "https://registry.aliyuncs.com/",
+    "https://hub-mirror.c.163.com/"
+  ]
+}
+EOF
+sudo systemctl daemon-reload && sudo systemctl restart docker && sleep 5 && echo "✅ Docker 已重新配置" && docker info | grep -A 3 "Registry Mirrors"
+
+---
+
+【等待上面命令执行完成，约 10-15 秒】
+
+---
+
+【然后执行部署】
+
+cd /opt/video-production-system && docker-compose down -v 2>/dev/null || true && sleep 2 && docker-compose up -d && echo "等待 30 秒..." && sleep 30 && docker-compose ps
+
+---
+
+【最后验证】
+
+docker-compose logs --tail=20
+
+---
+
+✅ 完成！访问 http://121.43.77.213

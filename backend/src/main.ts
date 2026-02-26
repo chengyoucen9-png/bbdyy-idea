@@ -6,7 +6,7 @@ import { setupSwagger } from './config/swagger.config';
 import { HttpExceptionFilter, AllExceptionsFilter } from './common/filters/http-exception.filter';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
-import * as helmet from 'helmet';
+import helmet from "helmet";
 import * as compression from 'compression';
 
 async function bootstrap() {
@@ -39,6 +39,8 @@ async function bootstrap() {
   );
 
   // 全局异常过滤器
+  
+  app.use('/uploads', (req, res, next) => { res.header('Access-Control-Allow-Origin', '*'); res.header('Cross-Origin-Resource-Policy', 'cross-origin'); next(); }, require('express').static(require('path').join(__dirname, '..', 'uploads')));
   app.useGlobalFilters(
     new AllExceptionsFilter(),
     new HttpExceptionFilter(),

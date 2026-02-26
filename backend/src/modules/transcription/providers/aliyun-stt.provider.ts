@@ -2,135 +2,113 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import * as crypto from 'crypto';
-import {
-  ITranscriptionProvider,
-  TranscriptionRequest,
-  TranscriptionResult,
-} from '../interfaces/transcription.interface';
+import { TranscriptionRequest, TranscriptionResult } from '../interfaces/transcription.interface';
 
 @Injectable()
-export class AliyunSTTProvider implements ITranscriptionProvider {
+export class AliyunSTTProvider {
   private readonly logger = new Logger(AliyunSTTProvider.name);
-  private readonly accessKeyId: string;
-  private readonly accessKeySecret: string;
-  private readonly appKey: string;
 
-  constructor(private configService: ConfigService) {
-    this.accessKeyId = configService.get('ALIYUN_ACCESS_KEY_ID');
-    this.accessKeySecret = configService.get('ALIYUN_ACCESS_KEY_SECRET');
-    this.appKey = configService.get('ALIYUN_NLS_APP_KEY');
-  }
+  constructor(private configService: ConfigService) {}
 
   async isAvailable(): Promise<boolean> {
-    return !!(this.accessKeyId && this.accessKeySecret && this.appKey);
+    const keyId = this.configService.get('OSS_ACCESS_KEY_ID');
+    const keySecret = this.configService.get('OSS_ACCESS_KEY_SECRET');
+    return !!(keyId && keySecret && keyId !== 'your_oss_access_key_id');
   }
 
   async transcribe(request: TranscriptionRequest): Promise<TranscriptionResult> {
-    this.logger.log(`开始阿里云转写: ${request.fileUrl}`);
-    
-    try {
-      // 1. 提交转写任务
-      const taskId = await this.submitTask(request);
-      
-      // 2. 轮询任务状态
-      const result = await this.pollTaskStatus(taskId);
-      
-      // 3. 解析结果
-      return this.parseResult(result, 'aliyun');
-    } catch (error) {
-      this.logger.error('阿里云转写失败', error.stack);
-      throw error;
-    }
+    const accessKeyId = this.configService.get('OSS_ACCESS_KEY_ID');
+    const accessKeySecret = this.configService.get('OSS_ACCESS_KEY_SECRET');
+
+    const taskId = await this.submitTask(request.fileUrl, accessKeyId, accessKeySecret);
+    this.logger.log(`转写任务提交成功，TaskId: ${taskId}`);
+
+    const result = await this.pollResult(taskId, accessKeyId, accessKeySecret);
+    return result;
   }
 
-  private async submitTask(request: TranscriptionRequest) {
-    const url = 'https://nls-filetrans.cn-shanghai.aliyuncs.com/filetrans';
-    
-    const params = {
-      appkey: this.appKey,
-      file_link: request.fileUrl,
-      version: '4.0',
-      enable_words: true,
-      enable_punctuation_prediction: request.enablePunctuation ?? true,
-      enable_inverse_text_normalization: true,
-      enable_diarization: request.enableDiarization ?? false,
+  private sign(params: Record<string, string>, secret: string): string {
+    const sortedKeys = Object.keys(params).sort();
+    const canonicalQuery = sortedKeys
+      .map(k => `${encodeURIComponent(k)}=${encodeURIComponent(params[k])}`)
+      .join('&');
+    const stringToSign = `POST&${encodeURIComponent('/')}&${encodeURIComponent(canonicalQuery)}`;
+    return crypto.createHmac('sha1', secret + '&').update(stringToSign).digest('base64');
+  }
+
+  private buildParams(action: string, extraParams: Record<string, string>, accessKeyId: string) {
+    const params: Record<string, string> = {
+      Action: action,
+      Version: '2019-08-19',
+      AccessKeyId: accessKeyId,
+      Timestamp: new Date().toISOString(),
+      SignatureMethod: 'HMAC-SHA1',
+      SignatureVersion: '1.0',
+      SignatureNonce: Math.random().toString(36).substring(2),
+      Format: 'JSON',
+      ...extraParams,
     };
-
-    const response = await axios.post(url, params, {
-      headers: {
-        'Content-Type': 'application/json',
-        ...this.generateAuthHeaders('POST', '/filetrans'),
-      },
-    });
-
-    if (response.data.StatusCode !== 200) {
-      throw new Error(`阿里云STT提交失败: ${response.data.StatusText}`);
-    }
-
-    return response.data.TaskId;
+    return params;
   }
 
-  private async pollTaskStatus(taskId: string, maxAttempts = 60): Promise<any> {
-    const url = `https://nls-filetrans.cn-shanghai.aliyuncs.com/filetrans?TaskId=${taskId}`;
-    
-    for (let i = 0; i < maxAttempts; i++) {
-      const response = await axios.get(url, {
-        headers: this.generateAuthHeaders('GET', `/filetrans?TaskId=${taskId}`),
-      });
+  private async submitTask(fileUrl: string, accessKeyId: string, accessKeySecret: string): Promise<string> {
+    const extraParams = {
+      FileLink: fileUrl,
+      LanguageId: 'zh-cn',
+    };
+    const params = this.buildParams('SubmitTask', extraParams, accessKeyId);
+    params.Signature = this.sign(params, accessKeySecret);
 
-      const status = response.data.StatusText;
-      
-      if (status === 'SUCCESS') {
-        return response.data;
-      } else if (status === 'FAILED') {
-        throw new Error(`转写失败: ${response.data.ErrorMessage}`);
+    const response = await axios.post(
+      'https://nls-filetrans.cn-shanghai.aliyuncs.com/',
+      new URLSearchParams(params).toString(),
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+    );
+
+    const data = response.data as any;
+    if (data.StatusCode !== 21050000) {
+      throw new Error(`提交转写失败: ${data.StatusText}`);
+    }
+    return data.TaskId;
+  }
+
+  private async pollResult(taskId: string, accessKeyId: string, accessKeySecret: string): Promise<TranscriptionResult> {
+    const maxRetries = 60;
+    for (let i = 0; i < maxRetries; i++) {
+      await new Promise(r => setTimeout(r, 3000));
+
+      const params = this.buildParams('GetTaskResult', { TaskId: taskId }, accessKeyId);
+      params.Signature = this.sign(params, accessKeySecret);
+
+      const response = await axios.post(
+        'https://nls-filetrans.cn-shanghai.aliyuncs.com/',
+        new URLSearchParams(params).toString(),
+        { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+      );
+
+      const data = response.data as any;
+      this.logger.log(`轮询状态: ${data.StatusText}`);
+
+      if (data.StatusText === 'SUCCESS') {
+        const result = JSON.parse(data.Result);
+        const sentences = result.Sentences || [];
+        const text = sentences.map((s: any) => s.Text).join('');
+        return {
+          text,
+          segments: sentences.map((s: any) => ({
+            text: s.Text,
+            startTime: s.BeginTime,
+            endTime: s.EndTime,
+          })),
+          confidence: 0.95,
+          duration: sentences.length > 0 ? sentences[sentences.length - 1].EndTime : 0,
+          provider: 'aliyun',
+          timestamp: Date.now(),
+        };
+      } else if (data.StatusText === 'FAILED') {
+        throw new Error(`转写失败: ${data.StatusText}`);
       }
-      
-      // 等待5秒后重试
-      await new Promise(resolve => setTimeout(resolve, 5000));
     }
-    
-    throw new Error('转写超时');
-  }
-
-  private parseResult(data: any, provider: string): TranscriptionResult {
-    const sentences = data.Result?.Sentences || [];
-    
-    const text = sentences.map((s: any) => s.Text).join('');
-    
-    const segments = sentences.map((s: any) => ({
-      text: s.Text,
-      startTime: s.BeginTime,
-      endTime: s.EndTime,
-      speaker: s.SpeakerId,
-    }));
-
-    return {
-      text,
-      segments,
-      confidence: data.Result?.Confidence || 0,
-      duration: data.Result?.Duration || 0,
-      provider: provider as any,
-      timestamp: Date.now(),
-    };
-  }
-
-  private generateAuthHeaders(method: string, path: string) {
-    const date = new Date().toUTCString();
-    const signature = this.calculateSignature(method, path, date);
-    
-    return {
-      'Date': date,
-      'Authorization': `acs ${this.accessKeyId}:${signature}`,
-    };
-  }
-
-  private calculateSignature(method: string, path: string, date: string): string {
-    const stringToSign = `${method}\n\napplication/json\n${date}\n${path}`;
-    
-    return crypto
-      .createHmac('sha1', this.accessKeySecret)
-      .update(stringToSign)
-      .digest('base64');
+    throw new Error('转写超时，请稍后重试');
   }
 }

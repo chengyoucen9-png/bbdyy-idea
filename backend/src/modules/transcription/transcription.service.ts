@@ -34,7 +34,7 @@ export class TranscriptionService {
 
     try {
       // 策略1：优先使用阿里云STT（专业、准确、便宜）
-      if (await this.aliyunSTT.isAvailable()) {
+      if (false) {
         this.logger.log('使用阿里云STT服务');
         result = await this.aliyunSTT.transcribe(request);
       } else {

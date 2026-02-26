@@ -5,8 +5,8 @@ WORKDIR /app
 # 复制package文件
 COPY package*.json ./
 
-# 安装依赖
-RUN npm ci --only=production
+# 安装全部依赖（包含 devDependencies，用于构建）
+RUN npm ci
 
 # 复制源代码
 COPY . .
@@ -14,18 +14,25 @@ COPY . .
 # 构建应用
 RUN npm run build
 
-# 生产阶段
+# ────────────────────────────────────────────
+# 生产阶段（仅保留运行时必要文件）
+# ────────────────────────────────────────────
 FROM node:18-alpine
 
 WORKDIR /app
 
-# 安装FFmpeg
+# 安装 FFmpeg（视频转写需要）
 RUN apk add --no-cache ffmpeg
 
-# 复制依赖和构建产物
-COPY --from=builder /app/node_modules ./node_modules
+# 只安装生产依赖
+COPY package*.json ./
+RUN npm ci --only=production
+
+# 复制构建产物
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/package*.json ./
+
+# 确保 uploads 目录存在
+RUN mkdir -p /app/uploads
 
 # 暴露端口
 EXPOSE 3000

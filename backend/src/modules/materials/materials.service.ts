@@ -1,10 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Like } from 'typeorm';
-import { Material } from './material.entity';
-import { CreateMaterialDto } from './dto/create-material.dto';
-import { UpdateMaterialDto } from './dto/update-material.dto';
-import { QueryMaterialDto } from './dto/query-material.dto';
+import { Repository } from 'typeorm';
+import { Material, FileType } from './material.entity';
+import { CreateMaterialDto, UpdateMaterialDto, QueryMaterialDto } from './dto';
 
 @Injectable()
 export class MaterialsService {
@@ -21,7 +19,7 @@ export class MaterialsService {
 
     if (search) {
       queryBuilder.andWhere(
-        '(material.name LIKE :search OR material.scene LIKE :search)',
+        '(material.name LIKE :search OR material.scene LIKE :search OR material.note LIKE :search)',
         { search: `%${search}%` },
       );
     }
@@ -32,44 +30,30 @@ export class MaterialsService {
       .take(limit)
       .getManyAndCount();
 
-    return {
-      items,
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit),
-    };
+    return { items, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
   async findOne(userId: number, id: number) {
     const material = await this.materialsRepository.findOne({
       where: { id, userId },
     });
-
-    if (!material) {
-      throw new NotFoundException('素材不存在');
-    }
-
+    if (!material) throw new NotFoundException('素材不存在');
     return material;
   }
 
   async create(userId: number, createMaterialDto: CreateMaterialDto) {
-    const material = this.materialsRepository.create({
-      ...createMaterialDto,
-      userId,
-    });
-
+    const material = this.materialsRepository.create({ ...createMaterialDto, userId });
     return this.materialsRepository.save(material);
   }
 
-  async update(
-    userId: number,
-    id: number,
-    updateMaterialDto: UpdateMaterialDto,
-  ) {
+  async update(userId: number, id: number, updateMaterialDto: UpdateMaterialDto) {
     const material = await this.findOne(userId, id);
     Object.assign(material, updateMaterialDto);
     return this.materialsRepository.save(material);
+  }
+
+  async findDuplicate(userId: number, filename: string, fileSize: number) {
+    return this.materialsRepository.findOne({ where: { userId, name: filename, fileSize } });
   }
 
   async remove(userId: number, id: number) {
@@ -88,18 +72,47 @@ export class MaterialsService {
   async getStatistics(userId: number) {
     const [total, imageCount, videoCount] = await Promise.all([
       this.materialsRepository.count({ where: { userId } }),
-      this.materialsRepository.count({
-        where: { userId, fileType: 'image' },
-      }),
-      this.materialsRepository.count({
-        where: { userId, fileType: 'video' },
-      }),
+      this.materialsRepository.count({ where: { userId, fileType: 'image' as any } }),
+      this.materialsRepository.count({ where: { userId, fileType: 'video' as any } }),
     ]);
+    return { total, imageCount, videoCount };
+  }
 
-    return {
-      total,
-      imageCount,
-      videoCount,
-    };
+  /**
+   * 根据关键词列表搜索匹配素材（不需要 topicId，直接用关键词）
+   * 在 name、scene、note、tags 中模糊匹配，按匹配关键词数量排序
+   */
+  async searchByKeywords(userId: number, keywords: string[]): Promise<Material[]> {
+    if (!keywords || keywords.length === 0) return [];
+
+    const all = await this.materialsRepository.find({ where: { userId } });
+
+    // 对每个素材打分：匹配到几个关键词
+    const scored = all.map((mat) => {
+      const text = [
+        mat.name || '',
+        mat.scene || '',
+        mat.note || '',
+        (mat.tags || []).join(' '),
+      ].join(' ').toLowerCase();
+
+      const score = keywords.reduce((acc, kw) => {
+        return acc + (text.includes(kw.toLowerCase()) ? 1 : 0);
+      }, 0);
+
+      return { mat, score };
+    });
+
+    const seen = new Set<string>();
+    return scored
+      .filter((s) => s.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .filter((s) => {
+        if (seen.has(s.mat.name)) return false;
+        seen.add(s.mat.name);
+        return true;
+      })
+      .slice(0, 10)
+      .map((s) => s.mat);
   }
 }

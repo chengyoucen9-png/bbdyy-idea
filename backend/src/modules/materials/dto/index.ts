@@ -26,6 +26,10 @@ export class CreateMaterialDto {
   @IsOptional()
   thumbnail?: string;
 
+  @IsString()
+  @IsOptional()
+  ossUrl?: string;
+
   @IsEnum(FileType)
   @IsOptional()
   fileType?: FileType;
