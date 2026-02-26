@@ -110,7 +110,7 @@ export class MaterialsController {
   @Get('stats/summary')
   @ApiOperation({ summary: '获取素材统计' })
   getStats(@Request() req) {
-    return this.materialsService.getStats(req.user.id);
+    return this.materialsService.getStatistics(req.user.id);
   }
 
   @Get(':id')
@@ -138,7 +138,7 @@ export class MaterialsController {
   @Delete(':id')
   @ApiOperation({ summary: '删除素材' })
   delete(@Param('id', ParseIntPipe) id: number, @Request() req) {
-    return this.materialsService.delete(id, req.user.id);
+    return this.materialsService.remove(req.user.id, id);
   }
 
   @Post(':id/mark-used')
