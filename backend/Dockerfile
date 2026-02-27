@@ -21,8 +21,10 @@ FROM node:18-alpine
 
 WORKDIR /app
 
-# 安装 FFmpeg（视频转写需要）
-RUN apk add --no-cache ffmpeg
+# 使用阿里云镜像安装 FFmpeg（国内服务器加速）
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories \
+    && apk update \
+    && apk add --no-cache ffmpeg
 
 # 只安装生产依赖
 COPY package*.json ./

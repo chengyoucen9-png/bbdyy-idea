@@ -83,7 +83,9 @@ export class AIModelSTTProvider implements ITranscriptionProvider {
   }
 
   private urlToLocalPath(url: string): string {
-    const urlPath = url.replace('http://localhost:3000/uploads/', '');
+    const urlPath = url
+      .replace(/^https?:\/\/[^/]+/, '')
+      .replace(/^\/uploads\//, '');
     return path.join(process.cwd(), 'uploads', urlPath);
   }
 

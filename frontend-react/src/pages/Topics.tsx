@@ -413,6 +413,14 @@ export default function TopicsPage() {
         </div>
       ),
     },
+    {
+      title: '最终定稿', dataIndex: 'finalDraft', key: 'finalDraft',
+      render: (finalDraft: string) => (
+        <div style={{ fontSize: 13, color: '#666', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 300 }}>
+          {finalDraft || '未填写'}
+        </div>
+      ),
+    },
     { title: '状态', dataIndex: 'status', key: 'status', width: 110, render: (s: string) => getStatusTag(s) },
     { title: '优先级', dataIndex: 'priority', key: 'priority', width: 80, render: (p: string) => getPriorityTag(p) },
     { title: '难度', dataIndex: 'difficulty', key: 'difficulty', width: 80, render: (d: number) => '⭐'.repeat(d || 1) },

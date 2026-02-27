@@ -222,7 +222,7 @@ export default function MaterialsPage() {
             <Tooltip title="转写">
               <Button
                 size="small" type="text"
-                icon={<SyncOutlined spin={transcribeMutation.isPending} />}
+                icon={<SyncOutlined spin={transcribeMutation.isPending && transcribeMutation.variables === record.id} />}
                 onClick={() => transcribeMutation.mutate(record.id)}
                 style={{ color: '#1890ff' }}
               />
