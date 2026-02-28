@@ -13,6 +13,7 @@ import { HealthModule } from './modules/health/health.module';
 import { TranscriptionModule } from './modules/transcription/transcription.module';
 import { MediaModule } from './modules/media/media.module';
 import { SettingsModule } from './modules/settings/settings.module';
+import { CrawlerModule } from './modules/crawler/crawler.module';
 
 @Module({
   imports: [
@@ -62,6 +63,7 @@ import { SettingsModule } from './modules/settings/settings.module';
     TranscriptionModule,
     MediaModule,
     SettingsModule,
+    CrawlerModule,
   ],
 })
 export class AppModule {}

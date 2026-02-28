@@ -78,4 +78,9 @@ export class UsersService {
     await this.usersRepository.update(id, { avatar: avatarUrl });
     return this.findOne(id);
   }
+
+  // 添加一个方法用于认证时查找用户
+  async findByUsername(username: string): Promise<User | undefined> {
+    return this.usersRepository.findOne({ where: { username } });
+  }
 }

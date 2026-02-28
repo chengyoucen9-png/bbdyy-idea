@@ -26,6 +26,19 @@ async function bootstrap() {
   // Gzip压缩
   app.use(compression());
 
+  // 记录所有请求的中间件
+  app.use((req: any, res: any, next: any) => {
+    if (req.method === 'POST' && req.url.includes('import-data')) {
+      logger.log(`===== 收到POST请求 =====`);
+      logger.log(`URL: ${req.url}`);
+      logger.log(`Headers: ${JSON.stringify(req.headers, null, 2)}`);
+      logger.log(`Body类型: ${typeof req.body}`);
+      logger.log(`Body内容: ${JSON.stringify(req.body, null, 2)}`);
+      logger.log(`===== 请求结束 =====`);
+    }
+    next();
+  });
+
   // 全局验证管道
   app.useGlobalPipes(
     new ValidationPipe({

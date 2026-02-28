@@ -2,7 +2,6 @@ import { Controller, Get } from '@nestjs/common';
 import {
   HealthCheck,
   HealthCheckService,
-  TypeOrmHealthIndicator,
   MemoryHealthIndicator,
   DiskHealthIndicator,
 } from '@nestjs/terminus';
@@ -13,7 +12,6 @@ import { ApiTags, ApiOperation } from '@nestjs/swagger';
 export class HealthController {
   constructor(
     private health: HealthCheckService,
-    private db: TypeOrmHealthIndicator,
     private memory: MemoryHealthIndicator,
     private disk: DiskHealthIndicator,
   ) {}
@@ -23,7 +21,6 @@ export class HealthController {
   @ApiOperation({ summary: '系统健康检查' })
   check() {
     return this.health.check([
-      () => this.db.pingCheck('database'),
       () => this.memory.checkHeap('memory_heap', 150 * 1024 * 1024), // 150MB
       () => this.memory.checkRSS('memory_rss', 300 * 1024 * 1024), // 300MB
       () =>
@@ -32,13 +29,6 @@ export class HealthController {
           thresholdPercent: 0.9,
         }),
     ]);
-  }
-
-  @Get('db')
-  @HealthCheck()
-  @ApiOperation({ summary: '数据库健康检查' })
-  checkDatabase() {
-    return this.health.check([() => this.db.pingCheck('database')]);
   }
 
   @Get('memory')

@@ -13,6 +13,7 @@ export enum FileType {
   IMAGE = 'image',
   VIDEO = 'video',
   AUDIO = 'audio',
+  TEXT = 'text',
 }
 
 @Entity('materials')
@@ -70,4 +71,44 @@ export class Material {
   @ManyToOne(() => User, (user) => user.materials, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'user_id' })
   user: User;
+
+  // 新增字段：用于存储从飞书同步的数据
+  @Column({ name: 'author_name', length: 200, nullable: true })
+  authorName: string;
+
+  @Column({ name: 'author_id', length: 200, nullable: true })
+  authorId: string;
+
+  @Column({ name: 'publish_time', type: 'bigint', nullable: true })
+  publishTime: number;
+
+  @Column({ name: 'like_count', type: 'int', nullable: true })
+  likeCount: number;
+
+  @Column({ name: 'comment_count', type: 'int', nullable: true })
+  commentCount: number;
+
+  @Column({ name: 'share_count', type: 'int', nullable: true })
+  shareCount: number;
+
+  @Column({ name: 'collect_count', type: 'int', nullable: true })
+  collectCount: number;
+
+  @Column({ type: 'text', nullable: true })
+  description: string;
+
+  @Column({ name: 'video_id', length: 200, nullable: true })
+  videoId: string;
+
+  @Column({ name: 'download_url', length: 1000, nullable: true })
+  downloadUrl: string;
+
+  @Column({ name: 'cover_url', length: 1000, nullable: true })
+  coverUrl: string;
+
+  @Column({ name: 'content_tags', type: 'json', nullable: true })
+  contentTags: string[];
+
+  @Column({ name: 'danmaku_count', type: 'int', nullable: true })
+  danmakuCount: number;
 }

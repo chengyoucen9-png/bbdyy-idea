@@ -41,3 +41,7 @@ lerna-debug.log*
 
 # uploads
 /uploads
+/downloads
+
+# video_production
+/video_production

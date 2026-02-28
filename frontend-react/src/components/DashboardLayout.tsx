@@ -9,6 +9,7 @@ import {
   LogoutOutlined,
   TeamOutlined,
   MessageOutlined,
+  SyncOutlined,
 } from '@ant-design/icons';
 import { useAuthStore } from '../store/auth';
 import { useUploadContext } from '../context/UploadContext';
@@ -25,9 +26,27 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const menuItems = [
     { key: '/', icon: <SearchOutlined />, label: '首页' },
     { key: '/videos', icon: <MessageOutlined />, label: 'AI 对话' },
-    { key: '/materials', icon: <FileImageOutlined />, label: '素材管理' },
+    {
+      key: '/materials',
+      icon: <FileImageOutlined />,
+      label: '素材管理',
+      children: [
+        { key: '/materials/bbdyy', label: 'bbdyy素材' },
+        { key: '/materials/talent', label: '达人素材' },
+      ],
+    },
     { key: '/topics', icon: <BulbOutlined />, label: '选题管理' },
     { key: '/ai-config', icon: <RobotOutlined />, label: 'AI配置' },
+    {
+      key: '/crawler',
+      icon: <SyncOutlined />,
+      label: '爬虫管理',
+      children: [
+        { key: '/crawler/tasks', label: '爬虫任务' },
+        { key: '/crawler/results', label: '执行结果' },
+        { key: '/crawler/sync', label: '多维表格同步' },
+      ],
+    },
     { key: '/users', icon: <TeamOutlined />, label: '用户管理' },
   ];
 
