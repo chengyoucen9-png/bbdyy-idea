@@ -1,7 +1,7 @@
 {
   "name": "video-production-backend",
-  "version": "1.1.0",
-  "description": "短视频内容生产系统后端服务",
+  "version": "1.2.6",
+  "description": "星枢后端服务",
   "author": "Your Name",
   "private": true,
   "license": "MIT",

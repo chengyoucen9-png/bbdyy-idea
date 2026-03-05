@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Table, Button, Upload, Modal, Form, Input, Select, Tag, message,
-  Space, Card, Statistic, Row, Col, Tooltip, Popconfirm, List,
+  Space, Card, Statistic, Row, Col, Tooltip, Popconfirm, List, Drawer,
 } from 'antd';
 import {
   UploadOutlined, FileImageOutlined, VideoCameraOutlined,
@@ -13,12 +13,134 @@ import {
 import { materialsAPI } from '../api/client';
 import { useUploadContext } from '../context/UploadContext';
 
+const TAG_OPTIONS = [
+  {
+    label: '内容结构',
+    options: ['开场', '结尾', '口播', '产品展示', '成分讲解', '对比测评', '种草', '避坑', '日常分享'].map(t => ({ label: t, value: t })),
+  },
+  {
+    label: '祛痘成分',
+    options: ['水杨酸', '壬二酸', '维A酸', '烟酰胺', '积雪草', '茶树精油', '硫磺', '杜鹃花酸', '过氧化苯甲酰'].map(t => ({ label: t, value: t })),
+  },
+  {
+    label: '皮肤问题',
+    options: ['闭口粉刺', '黑头', '炎症痘', '囊肿痘', '痘印', '痘疤', '控油', '毛孔粗大', '屏障受损', '敏感泛红'].map(t => ({ label: t, value: t })),
+  },
+  {
+    label: '适用肤质',
+    options: ['油皮', '混合偏油', '干皮', '敏感肌', '痘痘肌'].map(t => ({ label: t, value: t })),
+  },
+  {
+    label: '产品类型',
+    options: ['洗面奶', '水乳', '精华液', '面霜', '面膜', '防晒', '喷雾', '卸妆', '去角质'].map(t => ({ label: t, value: t })),
+  },
+  {
+    label: '使用场景',
+    options: ['早C晚A', '日常护肤', '应急处理', '换季护肤', '睡前护肤', '孕期可用'].map(t => ({ label: t, value: t })),
+  },
+];
+
+const PREDEFINED_TAG_VALUES = new Set(TAG_OPTIONS.flatMap(g => g.options.map(o => o.value)));
+
+// 标签多选组件
+function TagSelector({ value = [], onChange }: { value?: string[]; onChange?: (tags: string[]) => void }) {
+  const [searchText, setSearchText] = useState('');
+
+  const toggle = (tag: string) => {
+    const next = value.includes(tag) ? value.filter(t => t !== tag) : [...value, tag];
+    onChange?.(next);
+  };
+
+  const addCustom = () => {
+    const trimmed = searchText.trim();
+    if (!trimmed) return;
+    if (!value.includes(trimmed)) onChange?.([...value, trimmed]);
+    setSearchText('');
+  };
+
+  const keyword = searchText.trim().toLowerCase();
+  const isSearching = keyword.length > 0;
+
+  // 搜索时展示所有命中的预设标签（跨组平铺）
+  const filteredAll = isSearching
+    ? TAG_OPTIONS.flatMap(g => g.options).filter(o => o.label.includes(keyword))
+    : [];
+
+  // 自定义标签（不在预设中）
+  const customTags = value.filter(t => !PREDEFINED_TAG_VALUES.has(t));
+
+  const TagChip = ({ label, val }: { label: string; val: string }) => {
+    const selected = value.includes(val);
+    return (
+      <span
+        onClick={() => toggle(val)}
+        style={{
+          cursor: 'pointer', userSelect: 'none', borderRadius: 4,
+          padding: '3px 10px', fontSize: 13,
+          background: selected ? '#1677ff' : '#f5f5f5',
+          color: selected ? '#fff' : '#555',
+          border: `1px solid ${selected ? '#1677ff' : '#e0e0e0'}`,
+          fontWeight: selected ? 500 : 400,
+          transition: 'all 0.15s',
+        }}
+      >
+        {label}
+      </span>
+    );
+  };
+
+  return (
+    <div>
+      <Input
+        value={searchText}
+        onChange={e => setSearchText(e.target.value)}
+        onPressEnter={addCustom}
+        placeholder="搜索标签，无结果时按 Enter 添加自定义"
+        size="small"
+        allowClear
+        style={{ marginBottom: 10 }}
+      />
+
+      {isSearching ? (
+        // 搜索模式：平铺命中标签 + 自定义入口
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+          {filteredAll.length > 0
+            ? filteredAll.map(opt => <TagChip key={opt.value} label={opt.label} val={opt.value} />)
+            : <span style={{ fontSize: 12, color: '#aaa' }}>无匹配，按 Enter 添加「{searchText.trim()}」</span>
+          }
+        </div>
+      ) : (
+        // 浏览模式：按分组展示
+        TAG_OPTIONS.map(group => (
+          <div key={group.label} style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 11, color: '#999', marginBottom: 5, fontWeight: 500 }}>{group.label}</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+              {group.options.map(opt => <TagChip key={opt.value} label={opt.label} val={opt.value} />)}
+            </div>
+          </div>
+        ))
+      )}
+
+      {customTags.length > 0 && (
+        <div style={{ marginTop: 8 }}>
+          <div style={{ fontSize: 11, color: '#999', marginBottom: 5, fontWeight: 500 }}>自定义</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+            {customTags.map(t => (
+              <Tag key={t} closable onClose={() => toggle(t)} color="blue" style={{ margin: 0 }}>{t}</Tag>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // 预览弹窗
 function PreviewModal({ mat, open, onClose }: { mat: any; open: boolean; onClose: () => void }) {
   if (!mat) return null;
   const fileUrl = mat.ossUrl || mat.thumbnail;
   return (
-    <Modal title={mat.name} open={open} onCancel={onClose} footer={null} width={700} centered destroyOnClose>
+    <Modal title={mat.name} open={open} onCancel={onClose} footer={null} width={700} centered>
       <div>
         {fileUrl && mat.fileType === 'video' && (
           <video controls autoPlay style={{ width: '100%', borderRadius: 8, maxHeight: 400, background: '#000' }} src={fileUrl} />
@@ -64,17 +186,20 @@ export default function MaterialsPage() {
   const location = useLocation();
   const { setUploadTasks, setUploadProgress, setUploadRunning } = useUploadContext();
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
+  const [createDrawerOpen, setCreateDrawerOpen] = useState(false);
+  const [createAttachment, setCreateAttachment] = useState<File | null>(null);
   const [previewMat, setPreviewMat] = useState<any>(null);
   const [editMat, setEditMat] = useState<any>(null);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [batchUploading, setBatchUploading] = useState(false);
   const [editForm] = Form.useForm();
+  const [createForm] = Form.useForm();
   const [searchKeyword, setSearchKeyword] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
 
   const { data: materials, isLoading } = useQuery({
-    queryKey: ['materials'],
-    queryFn: () => materialsAPI.getList({ limit: 100, page: 1 }),
+    queryKey: ['materials', 'bbdyy'],
+    queryFn: () => materialsAPI.getList({ limit: 100, page: 1, type: 'bbdyy' }),
   });
 
   // 从首页"编辑素材"按钮跳转过来时，自动打开对应编辑弹窗
@@ -90,8 +215,8 @@ export default function MaterialsPage() {
   }, [location.state, materials]);
 
   const { data: stats } = useQuery({
-    queryKey: ['materials-stats'],
-    queryFn: () => materialsAPI.getStats(),
+    queryKey: ['materials-stats', 'bbdyy'],
+    queryFn: () => materialsAPI.getStats({ type: 'bbdyy' }),
   });
 
   const handleBatchUpload = async () => {
@@ -112,7 +237,7 @@ export default function MaterialsPage() {
       tasks[i] = { ...tasks[i], status: 'uploading' };
       setUploadTasks([...tasks]);
       try {
-        await materialsAPI.upload(pendingFiles[i], { name: pendingFiles[i].name });
+        await materialsAPI.upload(pendingFiles[i], { name: pendingFiles[i].name, authorName: 'bbdyy' });
         tasks[i] = { ...tasks[i], status: 'done' };
       } catch (err: any) {
         tasks[i] = { ...tasks[i], status: 'error', error: err.response?.data?.message || '上传失败' };
@@ -145,7 +270,10 @@ export default function MaterialsPage() {
       message.success('转写成功！');
       queryClient.invalidateQueries({ queryKey: ['materials'] });
     },
-    onError: () => message.error('转写失败'),
+    onError: (error: any) => {
+      const errorMessage = error.response?.data?.message || error.message || '转写失败';
+      message.error(`转写失败: ${errorMessage}`);
+    },
   });
 
   const updateMutation = useMutation({
@@ -154,6 +282,33 @@ export default function MaterialsPage() {
       message.success('保存成功！');
       queryClient.invalidateQueries({ queryKey: ['materials'] });
       setEditMat(null);
+    },
+  });
+
+  const handleCreateSubmit = async () => {
+    const v = await createForm.validateFields();
+    if (createAttachment) {
+      await materialsAPI.upload(createAttachment, {
+        name: v.name,
+        scene: v.scene || '',
+        note: v.note || '',
+        authorName: 'bbdyy',
+      });
+    } else {
+      await materialsAPI.create({ ...v, authorName: 'bbdyy', fileSize: 0 });
+    }
+    message.success('创建成功！');
+    queryClient.invalidateQueries({ queryKey: ['materials'] });
+    queryClient.invalidateQueries({ queryKey: ['materials-stats'] });
+    setCreateDrawerOpen(false);
+    setCreateAttachment(null);
+    createForm.resetFields();
+  };
+
+  const createMutation = useMutation({
+    mutationFn: handleCreateSubmit,
+    onError: (err: any) => {
+      message.error(err.response?.data?.message || '创建失败');
     },
   });
 
@@ -202,7 +357,7 @@ export default function MaterialsPage() {
     },
     {
       title: '标签', dataIndex: 'tags', key: 'tags', width: 220,
-      render: (tags: string[]) => tags?.length
+      render: (tags: string[]) => Array.isArray(tags) && tags.length
         ? tags.slice(0, 4).map((tag: string) => <Tag key={tag} color="blue" style={{ marginBottom: 2 }}>{tag}</Tag>)
         : <span style={{ color: '#ccc' }}>—</span>,
     },
@@ -276,7 +431,12 @@ export default function MaterialsPage() {
 
       <Card
         title={<span style={{ fontSize: 15, fontWeight: 600 }}>素材列表</span>}
-        extra={<Button type="primary" icon={<UploadOutlined />} onClick={() => setUploadModalOpen(true)}>上传素材</Button>}
+        extra={
+        <Space>
+          <Button icon={<EditOutlined />} onClick={() => setCreateDrawerOpen(true)}>手动创建</Button>
+          <Button type="primary" icon={<UploadOutlined />} onClick={() => setUploadModalOpen(true)}>上传素材</Button>
+        </Space>
+      }
       >
         <div style={{ display: 'flex', gap: 12, marginBottom: 16, alignItems: 'center' }}>
           <Input.Search
@@ -309,7 +469,7 @@ export default function MaterialsPage() {
           dataSource={filteredList}
           loading={isLoading}
           rowKey="id"
-          scroll={{ x: 900 }}
+          scroll={{ x: 'max-content' }}
           pagination={{ pageSize: 20, showTotal: (t) => `共 ${t} 条`, showSizeChanger: true }}
           size="middle"
         />
@@ -374,13 +534,27 @@ export default function MaterialsPage() {
         )}
       </Modal>
 
-      {/* 编辑弹窗 */}
-      <Modal title="编辑素材" open={!!editMat} onCancel={() => setEditMat(null)}
-        onOk={() => editForm.validateFields().then(v => updateMutation.mutate({ id: editMat.id, data: v }))}
-        okText="保存" confirmLoading={updateMutation.isPending} width={640}>
+      {/* 编辑侧边栏 */}
+      <Drawer
+        title="编辑素材"
+        placement="right"
+        width={780}
+        open={!!editMat}
+        onClose={() => setEditMat(null)}
+        footer={
+          <div style={{ textAlign: 'right' }}>
+            <Space>
+              <Button onClick={() => setEditMat(null)}>取消</Button>
+              <Button type="primary" loading={updateMutation.isPending}
+                onClick={() => editForm.validateFields().then(v => updateMutation.mutate({ id: editMat.id, data: v }))}>
+                保存
+              </Button>
+            </Space>
+          </div>
+        }
+      >
         {editMat && (
           <>
-            {/* 媒体预览 */}
             {(editMat.ossUrl || editMat.thumbnail) && (
               <div style={{ background: '#000', borderRadius: 8, overflow: 'hidden', marginBottom: 16, textAlign: 'center' }}>
                 {editMat.fileType === 'video' && (
@@ -402,18 +576,69 @@ export default function MaterialsPage() {
                 <Input />
               </Form.Item>
               <Form.Item name="tags" label="标签">
-                <Select mode="tags" style={{ width: '100%' }} placeholder="输入标签后按 Enter 添加" tokenSeparators={[',']} />
+                <TagSelector />
               </Form.Item>
               <Form.Item name="scene" label="场景描述">
                 <Input.TextArea rows={2} />
               </Form.Item>
               <Form.Item name="note" label="逐字稿">
-                <Input.TextArea rows={5} />
+                <Input.TextArea rows={8} />
               </Form.Item>
             </Form>
           </>
         )}
-      </Modal>
+      </Drawer>
+
+      {/* 手动创建侧边栏 */}
+      <Drawer
+        title="手动创建素材"
+        placement="right"
+        width={780}
+        open={createDrawerOpen}
+        onClose={() => { setCreateDrawerOpen(false); setCreateAttachment(null); createForm.resetFields(); }}
+        footer={
+          <div style={{ textAlign: 'right' }}>
+            <Space>
+              <Button onClick={() => { setCreateDrawerOpen(false); setCreateAttachment(null); createForm.resetFields(); }}>取消</Button>
+              <Button type="primary" loading={createMutation.isPending} onClick={() => createMutation.mutate()}>创建</Button>
+            </Space>
+          </div>
+        }
+      >
+        <Form form={createForm} layout="vertical">
+          <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}>
+            <Input placeholder="素材名称" />
+          </Form.Item>
+          <Form.Item name="fileType" label="文件类型" rules={[{ required: true, message: '请选择类型' }]} initialValue="text">
+            <Select options={[
+              { value: 'video', label: '🎬 视频' },
+              { value: 'image', label: '🖼️ 图片' },
+              { value: 'audio', label: '🎵 音频' },
+              { value: 'text', label: '📄 文本' },
+            ]} />
+          </Form.Item>
+          <Form.Item label="附件">
+            <Upload
+              maxCount={1}
+              beforeUpload={(file) => { setCreateAttachment(file); return false; }}
+              onRemove={() => setCreateAttachment(null)}
+              fileList={createAttachment ? [{ uid: '-1', name: createAttachment.name, status: 'done' }] : []}
+              accept="image/*,video/*,audio/*"
+            >
+              <Button icon={<UploadOutlined />}>选择文件</Button>
+            </Upload>
+          </Form.Item>
+          <Form.Item name="tags" label="标签">
+            <TagSelector />
+          </Form.Item>
+          <Form.Item name="scene" label="场景描述">
+            <Input.TextArea rows={2} placeholder="一句话描述使用场景" />
+          </Form.Item>
+          <Form.Item name="note" label="逐字稿">
+            <Input.TextArea rows={8} placeholder="视频文字内容" />
+          </Form.Item>
+        </Form>
+      </Drawer>
 
       {/* 预览弹窗 */}
       <PreviewModal mat={previewMat} open={!!previewMat} onClose={() => setPreviewMat(null)} />

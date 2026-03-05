@@ -42,8 +42,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       icon: <SyncOutlined />,
       label: '爬虫管理',
       children: [
-        { key: '/crawler/tasks', label: '爬虫任务' },
-        { key: '/crawler/results', label: '执行结果' },
         { key: '/crawler/sync', label: '多维表格同步' },
       ],
     },
@@ -63,11 +61,19 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          color: '#fff',
-          fontSize: collapsed ? 20 : 18,
-          fontWeight: 'bold',
+          padding: '0 16px',
         }}>
-          {collapsed ? '🎬' : '🎬 短视频系统'}
+          {collapsed ? (
+            <img src="/logo.svg" alt="星枢" style={{ width: 36, height: 36 }} />
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <img src="/logo.svg" alt="星枢" style={{ width: 36, height: 36, flexShrink: 0 }} />
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <span style={{ color: '#fff', fontSize: 17, fontWeight: 700, letterSpacing: 2, lineHeight: 1.2 }}>星枢</span>
+                <span style={{ color: 'rgba(255,255,255,0.45)', fontSize: 10, letterSpacing: 0.5, lineHeight: 1.5 }}>以星为引，枢动内容</span>
+              </div>
+            </div>
+          )}
         </div>
         <Menu
           theme="dark"

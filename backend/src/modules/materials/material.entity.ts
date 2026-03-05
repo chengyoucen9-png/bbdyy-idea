@@ -16,6 +16,14 @@ export enum FileType {
   TEXT = 'text',
 }
 
+export enum DownloadStatus {
+  PENDING = 'pending',
+  DOWNLOADING = 'downloading',
+  COMPLETED = 'completed',
+  FAILED = 'failed',
+  NO_URL = 'no_url',
+}
+
 @Entity('materials')
 export class Material {
   @PrimaryGeneratedColumn()
@@ -111,4 +119,13 @@ export class Material {
 
   @Column({ name: 'danmaku_count', type: 'int', nullable: true })
   danmakuCount: number;
+
+  @Column({
+    name: 'download_status',
+    type: 'enum',
+    enum: DownloadStatus,
+    default: DownloadStatus.NO_URL,
+    nullable: true,
+  })
+  downloadStatus: DownloadStatus;
 }

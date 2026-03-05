@@ -104,7 +104,7 @@ export default function LoginPage() {
 
         {/* 标题 */}
         <div style={{ color: '#fff', fontSize: 28, fontWeight: 700, letterSpacing: 1, marginBottom: 12, textAlign: 'center' }}>
-          短视频内容生产系统
+          星枢
         </div>
         <div style={{ color: 'rgba(255,255,255,0.55)', fontSize: 14, textAlign: 'center', lineHeight: 1.8, maxWidth: 300 }}>
           AI 辅助选题 · 素材智能管理 · 一键生成文稿

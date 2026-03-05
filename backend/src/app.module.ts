@@ -17,13 +17,11 @@ import { CrawlerModule } from './modules/crawler/crawler.module';
 
 @Module({
   imports: [
-    // 配置模块
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',
     }),
 
-    // 数据库模块
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({
@@ -38,20 +36,17 @@ import { CrawlerModule } from './modules/crawler/crawler.module';
         logging: configService.get('NODE_ENV') === 'development',
         charset: 'utf8mb4',
         timezone: '+08:00',
-        // 连接池配置
         extra: {
           connectionLimit: 10,
         },
       }),
     }),
 
-    // 速率限制模块（防止暴力攻击）
     ThrottlerModule.forRoot([{
-      ttl: 60000, // 60秒
-      limit: 100, // 最多100个请求
+      ttl: 60000,
+      limit: 100,
     }]),
 
-    // 业务模块
     AuthModule,
     UsersModule,
     MaterialsModule,

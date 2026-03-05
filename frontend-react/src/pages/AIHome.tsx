@@ -34,7 +34,7 @@ export default function AIHomePage() {
     setLoading(true);
     setTimeout(() => {
       const keywords = userInput.toLowerCase().split(/\s+/).filter(k => k.length > 1);
-      const matched = materials?.items?.filter((m: any) => {
+      const matched = (materials as any)?.filter((m: any) => {
         const text = `${m.name} ${m.scene} ${m.note}`.toLowerCase();
         return keywords.some(k => text.includes(k));
       }) || [];
@@ -58,8 +58,8 @@ export default function AIHomePage() {
         </div>
       </Card>
       <Row gutter={16} style={{ marginBottom: 32 }}>
-        <Col span={8}><Card><Statistic title="素材总数" value={stats?.total || 0} suffix="个" valueStyle={{ color: '#667eea' }} /></Card></Col>
-        <Col span={8}><Card><Statistic title="选题数量" value={topics?.length || 0} suffix="个" valueStyle={{ color: '#764ba2' }} /></Card></Col>
+        <Col span={8}><Card><Statistic title="素材总数" value={0} suffix="个" valueStyle={{ color: '#667eea' }} /></Card></Col>
+        <Col span={8}><Card><Statistic title="选题数量" value={0} suffix="个" valueStyle={{ color: '#764ba2' }} /></Card></Col>
         <Col span={8}><Card><Statistic title="视频作品" value={0} suffix="个" valueStyle={{ color: '#52c41a' }} /></Card></Col>
       </Row>
       {recommendations.length > 0 && (

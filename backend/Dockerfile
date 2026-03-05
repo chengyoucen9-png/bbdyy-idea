@@ -5,8 +5,8 @@ WORKDIR /app
 # 复制package文件
 COPY package*.json ./
 
-# 安装全部依赖（包含 devDependencies，用于构建）
-RUN npm ci
+# 安装全部依赖（包含 devDependencies，用于构建）跳过 puppeteer 下载 Chrome
+RUN PUPPETEER_SKIP_DOWNLOAD=true npm ci
 
 # 复制源代码
 COPY . .
@@ -26,9 +26,9 @@ RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
     && apk update \
     && apk add --no-cache ffmpeg
 
-# 只安装生产依赖
+# 只安装生产依赖（跳过 puppeteer 下载 Chrome）
 COPY package*.json ./
-RUN npm ci --only=production
+RUN PUPPETEER_SKIP_DOWNLOAD=true npm ci --only=production
 
 # 复制构建产物
 COPY --from=builder /app/dist ./dist

@@ -3,19 +3,43 @@ import { useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Table, Button, Form, Input, Select, Tag, message,
-  Space, Card, Statistic, Row, Col, Drawer, Spin, Modal,
+  Space, Card, Statistic, Row, Col, Drawer, Spin, Modal, Steps, Progress,
 } from 'antd';
 import {
-  PlusOutlined, EditOutlined, DeleteOutlined, RobotOutlined,
+  PlusOutlined, EditOutlined, DeleteOutlined,
   VideoCameraOutlined, AudioOutlined, FileImageOutlined,
   ReloadOutlined, CheckCircleOutlined, DownOutlined, UpOutlined,
-  PlayCircleOutlined, EyeOutlined, SearchOutlined,
-  CopyOutlined, ThunderboltOutlined, FileTextOutlined, BulbOutlined,
-  CheckOutlined, SaveOutlined,
+  PlayCircleOutlined, EyeOutlined,
+  ThunderboltOutlined, FileTextOutlined, BulbOutlined,
+  CheckOutlined, SaveOutlined, ArrowLeftOutlined,
 } from '@ant-design/icons';
 import { topicsAPI, materialsAPI } from '../api/client';
 
 const { TextArea } = Input;
+
+const PROMPT_STORAGE_KEY = 'xingshu_ai_prompts';
+
+interface StoredPrompt {
+  id: string;
+  name: string;
+  category: string;
+  content: string;
+}
+
+const PROMPT_CATEGORY_COLOR: Record<string, string> = {
+  '文稿生成': 'blue',
+  '标题生成': 'orange',
+  '开场白优化': 'purple',
+  '通用': 'green',
+  '其他': 'default',
+};
+
+const WIZARD_STEPS = [
+  { title: '填写想法' },
+  { title: '选择素材' },
+  { title: 'AI 创作' },
+  { title: '最终定稿' },
+];
 
 // ─── 预览弹窗 ──────────────────────────────────────────────────────────────────
 function PreviewModal({ mat, open, onClose }: { mat: any; open: boolean; onClose: () => void }) {
@@ -50,7 +74,7 @@ function PreviewModal({ mat, open, onClose }: { mat: any; open: boolean; onClose
   );
 }
 
-// ─── 素材卡片（紧凑 + 可勾选）──────────────────────────────────────────────────
+// ─── 素材卡片 ──────────────────────────────────────────────────────────────────
 function MaterialCard({ mat, selected, onToggle }: { mat: any; selected: boolean; onToggle: (id: number) => void }) {
   const [expanded, setExpanded] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -79,7 +103,6 @@ function MaterialCard({ mat, selected, onToggle }: { mat: any; selected: boolean
         }}
       >
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 9 }}>
-          {/* Checkbox */}
           <div style={{
             width: 16, height: 16, borderRadius: 3, marginTop: 2, flexShrink: 0,
             border: `2px solid ${selected ? '#1890ff' : '#d9d9d9'}`,
@@ -137,21 +160,6 @@ function MaterialCard({ mat, selected, onToggle }: { mat: any; selected: boolean
   );
 }
 
-// ─── 区块标题栏 ────────────────────────────────────────────────────────────────
-function SectionHeader({ label, icon, extra, sub }: { label: string; icon?: React.ReactNode; extra?: React.ReactNode; sub?: React.ReactNode }) {
-  return (
-    <div style={{ padding: '11px 18px 10px', background: '#fff', borderBottom: '1px solid #f0f0f0', flexShrink: 0 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
-          {icon}{label}
-        </span>
-        {extra}
-      </div>
-      {sub && <div style={{ marginTop: 6 }}>{sub}</div>}
-    </div>
-  );
-}
-
 // ─── 主页面 ────────────────────────────────────────────────────────────────────
 export default function TopicsPage() {
   const queryClient = useQueryClient();
@@ -159,6 +167,22 @@ export default function TopicsPage() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editingTopic, setEditingTopic] = useState<any>(null);
   const [form] = Form.useForm();
+
+  // 步骤
+  const [currentStep, setCurrentStep] = useState(0);
+
+  // 提示词
+  const [availablePrompts, setAvailablePrompts] = useState<StoredPrompt[]>([]);
+  const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null);
+
+  const loadAvailablePrompts = () => {
+    try {
+      const stored = localStorage.getItem(PROMPT_STORAGE_KEY);
+      if (stored) setAvailablePrompts(JSON.parse(stored));
+    } catch {
+      setAvailablePrompts([]);
+    }
+  };
 
   // 素材推荐
   const [relatedMaterials, setRelatedMaterials] = useState<any[]>([]);
@@ -176,22 +200,14 @@ export default function TopicsPage() {
   const [generatingTitles, setGeneratingTitles] = useState(false);
   const [generatingOpening, setGeneratingOpening] = useState(false);
   const [aiPlatform, setAiPlatform] = useState('小红书');
+  const [selectedTitleIndex, setSelectedTitleIndex] = useState<number | null>(null);
+  const [selectedOpeningIndex, setSelectedOpeningIndex] = useState<number | null>(null);
 
   // 定稿保存
   const [savingDraft, setSavingDraft] = useState(false);
 
   const { data: topics, isLoading } = useQuery({ queryKey: ['topics'], queryFn: () => topicsAPI.getList() });
   const { data: stats } = useQuery({ queryKey: ['topics-stats'], queryFn: () => topicsAPI.getStats() });
-
-  const createMutation = useMutation({
-    mutationFn: (data: any) => topicsAPI.create(data),
-    onSuccess: (newTopic: any) => {
-      message.success('创建成功！');
-      queryClient.invalidateQueries({ queryKey: ['topics'] });
-      queryClient.invalidateQueries({ queryKey: ['topics-stats'] });
-      if (newTopic?.id) setEditingTopic(newTopic);
-    },
-  });
 
   const updateMutation = useMutation({
     mutationFn: ({ id, data }: any) => topicsAPI.update(id, data),
@@ -233,7 +249,6 @@ export default function TopicsPage() {
     }
   }, []);
 
-  // 只按描述（想法）匹配素材
   const handleDescriptionChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
@@ -242,7 +257,9 @@ export default function TopicsPage() {
 
   const triggerSearchNow = () => {
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
-    searchByText(form.getFieldValue('description') || '');
+    const title = form.getFieldValue('title') || '';
+    const desc = form.getFieldValue('description') || '';
+    searchByText(`${title} ${desc}`.trim());
   };
 
   const toggleMaterial = (id: number) => {
@@ -253,13 +270,93 @@ export default function TopicsPage() {
     });
   };
 
-  // AI：生成文稿（未保存时自动先保存）
+  // 一键全量生成：文稿 → 标题 + 开场白
+  const autoGenerateAll = async () => {
+    const formValues = form.getFieldsValue(['title', 'description', 'status', 'priority', 'difficulty']);
+
+    let topicId = editingTopic?.id;
+    if (!topicId) {
+      if (!formValues.title) { message.warning('请先填写选题标题'); return; }
+      try {
+        const newTopic = await topicsAPI.create(formValues) as any;
+        topicId = newTopic.id;
+        setEditingTopic(newTopic);
+        queryClient.invalidateQueries({ queryKey: ['topics'] });
+        queryClient.invalidateQueries({ queryKey: ['topics-stats'] });
+      } catch (err: any) {
+        message.error(err.response?.data?.message || '保存失败');
+        return;
+      }
+    }
+
+    const selectedPrompt = availablePrompts.find(p => p.id === selectedPromptId);
+
+    // 1. 生成文稿
+    setGeneratingScript(true);
+    setAiScript('');
+    try {
+      const res = await topicsAPI.generateScript(topicId, Array.from(selectedMaterialIds), selectedPrompt?.content) as any;
+      setAiScript(res.script || '');
+    } catch (err: any) {
+      message.error(err.response?.data?.message || '生成文稿失败，请检查 AI 配置');
+      return;
+    } finally {
+      setGeneratingScript(false);
+    }
+
+    // 2. 并行生成标题 + 开场白
+    setGeneratingTitles(true);
+    setGeneratingOpening(true);
+    const [titlesResult, openingResult] = await Promise.allSettled([
+      topicsAPI.generateTitles(topicId, aiPlatform) as Promise<any>,
+      topicsAPI.optimizeOpening(topicId) as Promise<any>,
+    ]);
+    if (titlesResult.status === 'fulfilled') setAiTitles(titlesResult.value.titles || []);
+    setGeneratingTitles(false);
+    if (openingResult.status === 'fulfilled') setAiOpenings(openingResult.value.openings || []);
+    setGeneratingOpening(false);
+  };
+
+  // 步骤导航
+  const handleNext = async () => {
+    if (currentStep === 0) {
+      try {
+        await form.validateFields(['title']);
+      } catch {
+        return;
+      }
+      if (availablePrompts.length > 0 && !selectedPromptId) {
+        message.warning('请选择一个提示词模板');
+        return;
+      }
+      // 进入素材步骤时触发搜索
+      const title = form.getFieldValue('title') || '';
+      const desc = form.getFieldValue('description') || '';
+      searchByText(`${title} ${desc}`.trim());
+    }
+    if (currentStep === 1) {
+      setCurrentStep(2);
+      autoGenerateAll();
+      return;
+    }
+    if (currentStep === 2) {
+      // 自动将选中的开场白 + 文稿填入定稿
+      const opening = selectedOpeningIndex !== null ? aiOpenings[selectedOpeningIndex] : null;
+      const draft = opening ? `${opening.content}\n\n${aiScript}` : aiScript;
+      if (draft) form.setFieldValue('finalDraft', draft);
+    }
+    setCurrentStep(s => Math.min(s + 1, 3));
+  };
+
+  const handleBack = () => setCurrentStep(s => Math.max(s - 1, 0));
+
+  // AI：生成文稿
   const handleGenerateScript = async () => {
     let topicId = editingTopic?.id;
     if (!topicId) {
-      let values: any;
-      try { values = await form.validateFields(); }
-      catch { message.warning('请先填写选题标题'); return; }
+      // 同步读取表单值，避免 await 后字段卸载导致值丢失
+      const values = form.getFieldsValue(['title', 'description', 'status', 'priority', 'difficulty']);
+      if (!values.title) { message.warning('请先填写选题标题'); return; }
       try {
         const newTopic = await topicsAPI.create(values) as any;
         topicId = newTopic.id;
@@ -271,10 +368,13 @@ export default function TopicsPage() {
         return;
       }
     }
+    const selectedPrompt = availablePrompts.find(p => p.id === selectedPromptId);
+    const customPrompt = selectedPrompt?.content;
+
     setGeneratingScript(true);
     setAiScript('');
     try {
-      const res = await topicsAPI.generateScript(topicId, Array.from(selectedMaterialIds)) as any;
+      const res = await topicsAPI.generateScript(topicId, Array.from(selectedMaterialIds), customPrompt) as any;
       setAiScript(res.script || '');
       message.success('文稿生成成功！');
     } catch (err: any) {
@@ -310,12 +410,26 @@ export default function TopicsPage() {
 
   // 保存定稿
   const handleSaveDraft = async () => {
-    if (!editingTopic?.id) { message.warning('请先保存选题'); return; }
+    let topicId = editingTopic?.id;
+    if (!topicId) {
+      const values = form.getFieldsValue(['title', 'description', 'status', 'priority', 'difficulty']);
+      if (!values.title) { message.warning('请先填写选题标题'); return; }
+      try {
+        const newTopic = await topicsAPI.create(values) as any;
+        topicId = newTopic.id;
+        setEditingTopic(newTopic);
+        queryClient.invalidateQueries({ queryKey: ['topics'] });
+        queryClient.invalidateQueries({ queryKey: ['topics-stats'] });
+      } catch (err: any) {
+        message.error(err.response?.data?.message || '创建失败');
+        return;
+      }
+    }
     const finalDraft = form.getFieldValue('finalDraft');
     setSavingDraft(true);
     try {
-      await topicsAPI.update(editingTopic.id, { finalDraft });
-      message.success('定稿已保存');
+      await topicsAPI.update(topicId, { finalDraft });
+      message.success('定稿已保存！');
       queryClient.invalidateQueries({ queryKey: ['topics'] });
     } catch {
       message.error('保存失败');
@@ -331,19 +445,23 @@ export default function TopicsPage() {
     setHasSearched(false);
     setMatchedKeywords([]);
     setSelectedMaterialIds(new Set());
+    setSelectedPromptId(null);
     setAiScript('');
     setAiTitles([]);
     setAiOpenings([]);
+    setSelectedTitleIndex(null);
+    setSelectedOpeningIndex(null);
   };
 
   const openCreate = () => {
     setEditingTopic(null);
     resetPanel();
     form.resetFields();
+    setCurrentStep(0);
+    loadAvailablePrompts();
     setDrawerOpen(true);
   };
 
-  // 从首页"一键二创"按钮跳转过来时，自动打开创建抽屉并预填逐字稿
   useEffect(() => {
     const prefill = (location.state as any)?.prefill;
     if (!prefill) return;
@@ -355,6 +473,7 @@ export default function TopicsPage() {
       form.setFieldValue('description', prefill.description);
       searchByText(prefill.description);
     }
+    setCurrentStep(0);
     setDrawerOpen(true);
   }, [location.state]);
 
@@ -368,6 +487,8 @@ export default function TopicsPage() {
       finalDraft: topic.finalDraft, status: topic.status,
       priority: topic.priority, difficulty: topic.difficulty,
     });
+    setCurrentStep(0);
+    loadAvailablePrompts();
     setDrawerOpen(true);
     searchByText(`${topic.title} ${topic.description || ''}`);
   };
@@ -378,13 +499,7 @@ export default function TopicsPage() {
     setEditingTopic(null);
     resetPanel();
     form.resetFields();
-  };
-
-  const handleSave = () => {
-    form.validateFields().then(values => {
-      if (editingTopic) updateMutation.mutate({ id: editingTopic.id, data: values });
-      else createMutation.mutate(values);
-    });
+    setCurrentStep(0);
   };
 
   const getStatusTag = (status: string) => {
@@ -467,7 +582,7 @@ export default function TopicsPage() {
           pagination={{ pageSize: 10, showTotal: (t) => `共 ${t} 条` }} />
       </Card>
 
-      {/* ════════════════ 抽屉 ════════════════ */}
+      {/* ════════════════ 分步向导抽屉 ════════════════ */}
       <Drawer
         title={
           <Space>
@@ -476,46 +591,100 @@ export default function TopicsPage() {
             {editingTopic && getStatusTag(editingTopic.status)}
           </Space>
         }
-        open={drawerOpen} onClose={handleClose} width="90vw"
+        open={drawerOpen}
+        onClose={handleClose}
+        closable={false}
+        extra={
+          <Button type="text" icon={<span style={{ fontSize: 16, color: '#999' }}>×</span>} onClick={handleClose} />
+        }
+        width={860}
         styles={{
           body: { padding: 0, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' },
           header: { borderBottom: '1px solid #f0f0f0', padding: '12px 20px' },
         }}
-        extra={
-          <Space>
-            <Button onClick={handleClose}>取消</Button>
-            <Button type="primary" loading={createMutation.isPending || updateMutation.isPending} onClick={handleSave}>
-              {editingTopic ? '保存修改' : '创建选题'}
-            </Button>
-          </Space>
-        }
       >
-        {/* Form 跨列使用 component={false} */}
         <Form form={form} layout="vertical" component={false}>
-          <div style={{ display: 'flex', flex: 1, height: '100%', overflow: 'hidden' }}>
 
-            {/* ══════════ 左列 ══════════ */}
-            <div style={{ width: 380, flexShrink: 0, display: 'flex', flexDirection: 'column', borderRight: '1px solid #eee', overflow: 'hidden' }}>
+          {/* ── 进度条 ── */}
+          <div style={{ padding: '12px 24px', background: '#fff', borderBottom: '1px solid #f0f0f0', flexShrink: 0 }}>
+            <Progress
+              percent={Math.round(((currentStep + 1) / 4) * 100)}
+              showInfo={false}
+              strokeColor={{ '0%': '#1890ff', '100%': '#52c41a' }}
+              style={{ marginBottom: 10 }}
+              size={[undefined, 3]}
+            />
+            <Steps
+              current={currentStep}
+              size="small"
+              items={WIZARD_STEPS}
+              onChange={(step) => {
+                if (step < currentStep) setCurrentStep(step);
+              }}
+            />
+          </div>
 
-              {/* 左上：填写想法 */}
-              <div style={{ flex: '0 0 52%', minHeight: 0, overflowY: 'auto', padding: '18px 18px 12px', background: '#fff' }}>
-                <div style={{ fontSize: 12, color: '#aaa', marginBottom: 12, fontWeight: 500, letterSpacing: 0.5 }}>① 填写想法</div>
+          {/* ── 步骤内容区 ── */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: '24px 32px' }}>
 
-                <Form.Item name="title" label={<span style={{ fontWeight: 600, fontSize: 13 }}>选题标题</span>} rules={[{ required: true, message: '请输入标题' }]} style={{ marginBottom: 14 }}>
-                  <Input placeholder="一句话描述你的想法" />
+            {/* Step 0：填写想法 */}
+            {currentStep === 0 && (
+              <div style={{ maxWidth: 520, margin: '0 auto' }}>
+                <Form.Item
+                  name="title"
+                  label="选题标题"
+                  rules={[{ required: true, message: '请输入标题' }]}
+                >
+                  <Input placeholder="一句话描述你的想法..." />
                 </Form.Item>
 
                 <Form.Item
                   name="description"
-                  label={<span style={{ fontWeight: 600, fontSize: 13 }}>想法描述</span>}
-                  style={{ marginBottom: 14 }}
+                  label="想法描述"
                 >
-                  <TextArea rows={6} placeholder={`描述内容方向、目标人群、核心观点...\n停止输入后自动匹配左下方素材`} onChange={handleDescriptionChange} />
+                  <TextArea
+                    rows={6}
+                    placeholder={`描述内容方向、目标人群、核心观点...\n填写后系统会自动匹配相关素材`}
+                    onChange={handleDescriptionChange}
+                  />
                 </Form.Item>
 
-                <Row gutter={10}>
+                {/* 提示词选择 */}
+                {availablePrompts.length > 0 && (
+                  <Form.Item
+                    label="引用提示词"
+                    required
+                  >
+                    <Select
+                      placeholder="选择一个提示词模板（可不选）"
+                      allowClear
+                      value={selectedPromptId}
+                      onChange={v => setSelectedPromptId(v ?? null)}
+                      optionLabelProp="label"
+                    >
+                      {(() => {
+                        const grouped = PROMPT_CATEGORY_COLOR;
+                        const categories = [...new Set(availablePrompts.map(p => p.category))];
+                        return categories.map(cat => (
+                          <Select.OptGroup key={cat} label={cat}>
+                            {availablePrompts.filter(p => p.category === cat).map(p => (
+                              <Select.Option key={p.id} value={p.id} label={p.name}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  <span style={{ flex: 1 }}>{p.name}</span>
+                                  <Tag color={grouped[p.category] || 'default'} style={{ margin: 0, fontSize: 10 }}>{p.category}</Tag>
+                                </div>
+                              </Select.Option>
+                            ))}
+                          </Select.OptGroup>
+                        ));
+                      })()}
+                    </Select>
+                  </Form.Item>
+                )}
+
+                <Row gutter={12}>
                   <Col span={8}>
-                    <Form.Item name="status" label={<span style={{ fontSize: 13 }}>状态</span>} initialValue="pending" style={{ marginBottom: 0 }}>
+                    <Form.Item name="status" label="状态" initialValue="pending" style={{ marginBottom: 0 }}>
                       <Select>
                         <Select.Option value="pending">💡 想法</Select.Option>
                         <Select.Option value="inProgress">✍️ 创作中</Select.Option>
@@ -524,7 +693,7 @@ export default function TopicsPage() {
                     </Form.Item>
                   </Col>
                   <Col span={8}>
-                    <Form.Item name="priority" label={<span style={{ fontSize: 13 }}>优先级</span>} initialValue="medium" style={{ marginBottom: 0 }}>
+                    <Form.Item name="priority" label="优先级" initialValue="medium" style={{ marginBottom: 0 }}>
                       <Select>
                         <Select.Option value="low">🟢 低</Select.Option>
                         <Select.Option value="medium">🟡 中</Select.Option>
@@ -533,7 +702,7 @@ export default function TopicsPage() {
                     </Form.Item>
                   </Col>
                   <Col span={8}>
-                    <Form.Item name="difficulty" label={<span style={{ fontSize: 13 }}>难度</span>} initialValue={2} style={{ marginBottom: 0 }}>
+                    <Form.Item name="difficulty" label="难度" initialValue={2} style={{ marginBottom: 0 }}>
                       <Select>
                         <Select.Option value={1}>⭐ 简单</Select.Option>
                         <Select.Option value={2}>⭐⭐ 中等</Select.Option>
@@ -542,209 +711,259 @@ export default function TopicsPage() {
                     </Form.Item>
                   </Col>
                 </Row>
+
               </div>
+            )}
 
-              {/* 左下：推荐素材 */}
-              <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', borderTop: '2px solid #f0f0f0' }}>
-                <SectionHeader
-                  label="② 推荐素材"
-                  icon={<SearchOutlined style={{ color: '#1890ff' }} />}
-                  extra={
-                    <Space size={6}>
-                      {selCount > 0 && (
-                        <Button type="text" size="small" style={{ fontSize: 11, color: '#aaa', padding: '0 4px' }} onClick={() => setSelectedMaterialIds(new Set())}>清空</Button>
-                      )}
-                      <Button size="small" icon={<ReloadOutlined />} loading={searchingMaterials} onClick={triggerSearchNow}>刷新</Button>
-                    </Space>
-                  }
-                  sub={hasSearched ? (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                      {selCount > 0 && <Tag color="blue" style={{ margin: 0 }}>已选 {selCount} 个</Tag>}
-                      {relatedMaterials.length > 0
-                        ? <Tag style={{ margin: 0, fontSize: 11 }}>共 {relatedMaterials.length} 个匹配</Tag>
-                        : <Tag style={{ margin: 0, fontSize: 11 }}>未找到匹配</Tag>}
-                      {matchedKeywords.slice(0, 3).map(kw => <Tag key={kw} style={{ margin: 0, fontSize: 10, color: '#999' }}>{kw}</Tag>)}
-                    </div>
-                  ) : undefined}
-                />
-                <div style={{ flex: 1, overflowY: 'auto', padding: '10px 14px' }}>
-                  {searchingMaterials ? (
-                    <div style={{ textAlign: 'center', paddingTop: '8vh' }}><Spin /><div style={{ marginTop: 10, color: '#aaa', fontSize: 12 }}>匹配中...</div></div>
-                  ) : !hasSearched ? (
-                    <div style={{ textAlign: 'center', paddingTop: '8vh' }}>
-                      <div style={{ fontSize: 32, marginBottom: 10 }}>🔍</div>
-                      <div style={{ fontSize: 12, color: '#bbb', lineHeight: 2 }}>在上方输入描述<br />自动匹配相关素材</div>
-                    </div>
-                  ) : relatedMaterials.length === 0 ? (
-                    <div style={{ textAlign: 'center', paddingTop: '8vh' }}>
-                      <div style={{ fontSize: 32, marginBottom: 10 }}>📭</div>
-                      <div style={{ fontSize: 12, color: '#bbb', lineHeight: 2, marginBottom: 12 }}>未找到相关素材</div>
-                      <Button size="small" icon={<ReloadOutlined />} onClick={triggerSearchNow}>重新匹配</Button>
-                    </div>
-                  ) : (
-                    relatedMaterials.map((mat: any) => (
-                      <MaterialCard key={mat.id} mat={mat} selected={selectedMaterialIds.has(mat.id)} onToggle={toggleMaterial} />
-                    ))
-                  )}
-                </div>
-              </div>
-
-            </div>
-
-            {/* ══════════ 右列 ══════════ */}
-            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-
-              {/* 右上：AI 创作 */}
-              <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#f7f8fa' }}>
-                <SectionHeader
-                  label="③ AI 创作"
-                  icon={<RobotOutlined style={{ color: '#722ed1' }} />}
-                  extra={
-                    <Space size={8}>
-                      {selCount > 0 && <Tag color="purple" style={{ margin: 0 }}>基于 {selCount} 个素材</Tag>}
-                      <Button
-                        type="primary" icon={<ThunderboltOutlined />}
-                        loading={generatingScript}
-                        onClick={handleGenerateScript}
-                      >
-                        {generatingScript ? '生成中...' : selCount > 0 ? '基于选中素材生成' : '直接生成文稿'}
+            {/* Step 1：选择素材 */}
+            {currentStep === 1 && (
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                    {selCount > 0 && <Tag color="blue">已选 {selCount} 个</Tag>}
+                    {hasSearched && (
+                      relatedMaterials.length > 0
+                        ? <Tag>共 {relatedMaterials.length} 个匹配</Tag>
+                        : <Tag>未找到匹配</Tag>
+                    )}
+                    {matchedKeywords.slice(0, 3).map(kw => (
+                      <Tag key={kw} style={{ fontSize: 11, color: '#999' }}>{kw}</Tag>
+                    ))}
+                  </div>
+                  <Space>
+                    {selCount > 0 && (
+                      <Button type="text" size="small" style={{ color: '#aaa' }} onClick={() => setSelectedMaterialIds(new Set())}>
+                        清空选择
                       </Button>
-                    </Space>
-                  }
-                />
-
-                <div style={{ flex: 1, overflowY: 'auto', padding: '14px 18px' }}>
-                  {generatingScript ? (
-                    <div style={{ textAlign: 'center', paddingTop: '14vh' }}>
-                      <Spin size="large" />
-                      <div style={{ marginTop: 18, color: '#888', fontSize: 13, lineHeight: 2 }}>
-                        AI 正在结合你的想法{selCount > 0 ? `和 ${selCount} 个素材的逐字稿` : ''}生成文稿<br />
-                        通常需要 10–30 秒...
-                      </div>
-                    </div>
-                  ) : !aiScript ? (
-                    <div style={{ textAlign: 'center', paddingTop: '14vh' }}>
-                      <div style={{ fontSize: 40, marginBottom: 14 }}>🤖</div>
-                      <div style={{ fontSize: 13, color: '#888', marginBottom: 6 }}>
-                        {selCount > 0 ? `已选 ${selCount} 个素材，点击右上角按钮生成` : '点击右上角按钮生成文稿'}
-                      </div>
-                      <div style={{ fontSize: 12, color: '#bbb', lineHeight: 2 }}>
-                        AI 将结合选题想法{selCount > 0 ? '和所选素材逐字稿' : ''}<br />创作适合发布的视频文稿
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                      {/* 生成的文稿 */}
-                      <div style={{ background: '#fff', borderRadius: 10, padding: '16px 18px', marginBottom: 12, border: '1px solid #e8e8e8' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                          <span style={{ fontWeight: 600, fontSize: 13 }}>
-                            <FileTextOutlined style={{ color: '#1890ff', marginRight: 7 }} />生成的文稿
-                          </span>
-                          <Space size={6}>
-                            <Button size="small" icon={<CopyOutlined />} onClick={() => copyToClipboard(aiScript)}>复制</Button>
-                            <Button size="small" type="primary" ghost
-                              onClick={() => { form.setFieldValue('finalDraft', aiScript); message.success('已填入右下角定稿区'); }}>
-                              填入定稿
-                            </Button>
-                            <Button size="small" type="text" icon={<ReloadOutlined />} style={{ color: '#bbb' }} onClick={handleGenerateScript}>重新生成</Button>
-                          </Space>
-                        </div>
-                        <TextArea value={aiScript} onChange={e => setAiScript(e.target.value)} autoSize={{ minRows: 6, maxRows: 12 }} style={{ fontSize: 13, lineHeight: 1.9, border: '1px solid #f0f0f0', background: '#fafafa', borderRadius: 6 }} />
-                      </div>
-
-                      {/* 爆款标题 */}
-                      <div style={{ background: '#fff', borderRadius: 10, padding: '14px 18px', marginBottom: 12, border: '1px solid #e8e8e8' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: aiTitles.length ? 10 : 0 }}>
-                          <span style={{ fontWeight: 600, fontSize: 13 }}><BulbOutlined style={{ color: '#fa8c16', marginRight: 7 }} />爆款标题</span>
-                          <Space size={7}>
-                            <Select size="small" value={aiPlatform} onChange={setAiPlatform} style={{ width: 80 }}
-                              options={[{ value: '小红书' }, { value: '抖音' }, { value: '视频号' }, { value: 'B站' }]} />
-                            <Button size="small" type="primary" ghost icon={<ThunderboltOutlined />} loading={generatingTitles} onClick={handleGenerateTitles}>
-                              {aiTitles.length ? '重新生成' : '生成标题'}
-                            </Button>
-                          </Space>
-                        </div>
-                        {aiTitles.length > 0 ? (
-                          aiTitles.map((title, i) => (
-                            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '8px 10px', background: '#f7f8fa', borderRadius: 7, marginBottom: 6, border: '1px solid #f0f0f0' }}>
-                              <span style={{ color: '#ccc', fontSize: 11, width: 14, flexShrink: 0 }}>{i + 1}.</span>
-                              <span style={{ flex: 1, fontSize: 13, lineHeight: 1.6 }}>{title}</span>
-                              <Button type="text" size="small" icon={<CopyOutlined />} style={{ color: '#bbb', flexShrink: 0 }} onClick={() => copyToClipboard(title)} />
-                            </div>
-                          ))
-                        ) : (
-                          <div style={{ fontSize: 12, color: '#ccc', marginTop: 8 }}>选择平台，生成 5 个爆款标题</div>
-                        )}
-                      </div>
-
-                      {/* 开场白优化 */}
-                      <div style={{ background: '#fff', borderRadius: 10, padding: '14px 18px', border: '1px solid #e8e8e8' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: aiOpenings.length ? 10 : 0 }}>
-                          <span style={{ fontWeight: 600, fontSize: 13 }}><ThunderboltOutlined style={{ color: '#722ed1', marginRight: 7 }} />开场白优化</span>
-                          <Button size="small" type="primary" ghost icon={<ThunderboltOutlined />} loading={generatingOpening} onClick={handleOptimizeOpening}>
-                            {aiOpenings.length ? '重新优化' : '优化开场'}
-                          </Button>
-                        </div>
-                        {aiOpenings.length > 0 ? (
-                          aiOpenings.map((o, i) => (
-                            <div key={i} style={{ padding: '10px 12px', background: '#f7f8fa', borderRadius: 8, marginBottom: 8, border: '1px solid #f0f0f0' }}>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                                <Tag color="purple" style={{ margin: 0 }}>{o.style}</Tag>
-                                <Button type="text" size="small" icon={<CopyOutlined />} style={{ color: '#bbb' }} onClick={() => copyToClipboard(o.content)} />
-                              </div>
-                              <div style={{ fontSize: 13, color: '#333', lineHeight: 1.8 }}>{o.content}</div>
-                            </div>
-                          ))
-                        ) : (
-                          <div style={{ fontSize: 12, color: '#ccc', marginTop: 8 }}>基于文稿，生成 3 种风格的开场白方案</div>
-                        )}
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              {/* 右下：最终定稿 */}
-              <div style={{ flex: '0 0 260px', display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#fff', borderTop: '2px solid #e8e8e8' }}>
-                <SectionHeader
-                  label="④ 最终定稿"
-                  icon={<SaveOutlined style={{ color: '#52c41a' }} />}
-                  extra={
-                    <Button
-                      size="small" type="primary"
-                      icon={<SaveOutlined />}
-                      loading={savingDraft}
-                      onClick={handleSaveDraft}
-                    >
-                      保存定稿
+                    )}
+                    <Button size="small" icon={<ReloadOutlined />} loading={searchingMaterials} onClick={triggerSearchNow}>
+                      重新匹配
                     </Button>
-                  }
-                  sub={<span style={{ fontSize: 11, color: '#bbb' }}>在此记录最终版本，或点击上方「填入定稿」自动填充</span>}
-                />
-                <div style={{ flex: 1, padding: '10px 18px 12px', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-                  <Form.Item name="finalDraft" className="draft-full-height" style={{ flex: 1, marginBottom: 0 }}>
-                    <TextArea
-                      placeholder="在这里记录最终定稿的文案或脚本..."
-                      style={{ resize: 'none', fontFamily: 'inherit', fontSize: 13, lineHeight: 1.9, border: '1px solid #f0f0f0', borderRadius: 8, height: '100%' }}
-                    />
-                  </Form.Item>
+                  </Space>
                 </div>
-              </div>
 
+                {searchingMaterials ? (
+                  <div style={{ textAlign: 'center', paddingTop: 80 }}>
+                    <Spin />
+                    <div style={{ marginTop: 10, color: '#aaa', fontSize: 12 }}>匹配中...</div>
+                  </div>
+                ) : !hasSearched ? (
+                  <div style={{ textAlign: 'center', paddingTop: 80 }}>
+                    <div style={{ fontSize: 40, marginBottom: 12 }}>🔍</div>
+                    <div style={{ fontSize: 13, color: '#bbb', lineHeight: 2 }}>
+                      未检测到相关描述<br />点击「重新匹配」手动触发，或跳过此步骤
+                    </div>
+                  </div>
+                ) : relatedMaterials.length === 0 ? (
+                  <div style={{ textAlign: 'center', paddingTop: 80 }}>
+                    <div style={{ fontSize: 40, marginBottom: 12 }}>📭</div>
+                    <div style={{ fontSize: 13, color: '#bbb', lineHeight: 2, marginBottom: 16 }}>
+                      未找到相关素材<br />可直接跳过继续 AI 创作
+                    </div>
+                    <Button size="small" icon={<ReloadOutlined />} onClick={triggerSearchNow}>重新匹配</Button>
+                  </div>
+                ) : (
+                  relatedMaterials.map((mat: any) => (
+                    <MaterialCard key={mat.id} mat={mat} selected={selectedMaterialIds.has(mat.id)} onToggle={toggleMaterial} />
+                  ))
+                )}
+              </div>
+            )}
+
+            {/* Step 2：AI 创作 */}
+            {currentStep === 2 && (
+              <div>
+                {/* 信息栏 */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 20 }}>
+                  {selCount > 0 && <Tag color="blue">素材 {selCount} 个</Tag>}
+                  {selectedPromptId && <Tag color="purple">{availablePrompts.find(p => p.id === selectedPromptId)?.name}</Tag>}
+                </div>
+
+                {generatingScript ? (
+                  <div style={{ textAlign: 'center', paddingTop: 80 }}>
+                    <Spin size="large" />
+                    <div style={{ marginTop: 18, color: '#888', fontSize: 13, lineHeight: 2 }}>
+                      AI 正在生成内容...<br />通常需要 10–30 秒
+                    </div>
+                  </div>
+                ) : !aiScript ? (
+                  <div style={{ textAlign: 'center', paddingTop: 80 }}>
+                    <div style={{ fontSize: 48, marginBottom: 14 }}>🤖</div>
+                    <div style={{ fontSize: 13, color: '#888', marginBottom: 16 }}>
+                      AI 将基于你的想法生成视频文稿、爆款标题和开场白
+                    </div>
+                    <Button type="primary" icon={<ThunderboltOutlined />} onClick={autoGenerateAll}>开始生成</Button>
+                  </div>
+                ) : (
+                  <>
+                    {/* 生成的文稿 */}
+                    <div style={{ background: '#fff', borderRadius: 10, padding: '16px 18px', marginBottom: 16, border: '1px solid #e8e8e8' }}>
+                      <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 12 }}>
+                        <FileTextOutlined style={{ color: '#1890ff', marginRight: 7 }} />生成的文稿
+                      </div>
+                      <TextArea
+                        value={aiScript}
+                        onChange={e => setAiScript(e.target.value)}
+                        autoSize={{ minRows: 6, maxRows: 14 }}
+                        style={{ fontSize: 13, lineHeight: 1.9, border: '1px solid #f0f0f0', background: '#fafafa', borderRadius: 6 }}
+                      />
+                    </div>
+
+                    {/* 爆款标题 */}
+                    <div style={{ background: '#fff', borderRadius: 10, padding: '14px 18px', marginBottom: 16, border: '1px solid #e8e8e8' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                        <span style={{ fontWeight: 600, fontSize: 13 }}>
+                          <BulbOutlined style={{ color: '#fa8c16', marginRight: 7 }} />爆款标题
+                          {selectedTitleIndex !== null && (
+                            <span style={{ fontSize: 11, color: '#1890ff', fontWeight: 400, marginLeft: 8 }}>已选第 {selectedTitleIndex + 1} 条</span>
+                          )}
+                        </span>
+                        <Space size={7}>
+                          <Select size="small" value={aiPlatform} onChange={v => { setAiPlatform(v); setSelectedTitleIndex(null); }} style={{ width: 80 }}
+                            options={[{ value: '小红书' }, { value: '抖音' }, { value: '视频号' }, { value: 'B站' }]} />
+                          <Button size="small" type="primary" ghost icon={<ThunderboltOutlined />} loading={generatingTitles} onClick={() => { setSelectedTitleIndex(null); handleGenerateTitles(); }}>
+                            {aiTitles.length ? '重新生成' : '生成标题'}
+                          </Button>
+                        </Space>
+                      </div>
+                      {generatingTitles ? (
+                        <div style={{ textAlign: 'center', padding: '12px 0', color: '#aaa', fontSize: 12 }}><Spin size="small" style={{ marginRight: 6 }} />生成中...</div>
+                      ) : aiTitles.length > 0 ? (
+                        aiTitles.map((title, i) => (
+                          <div
+                            key={i}
+                            onClick={() => setSelectedTitleIndex(selectedTitleIndex === i ? null : i)}
+                            style={{
+                              display: 'flex', alignItems: 'center', gap: 8,
+                              padding: '10px 12px', borderRadius: 7, marginBottom: 6, cursor: 'pointer', transition: 'all 0.15s',
+                              background: selectedTitleIndex === i ? '#e6f4ff' : '#f7f8fa',
+                              border: `1px solid ${selectedTitleIndex === i ? '#91caff' : '#f0f0f0'}`,
+                            }}
+                          >
+                            <span style={{ color: selectedTitleIndex === i ? '#1890ff' : '#ccc', fontSize: 11, width: 16, flexShrink: 0 }}>{i + 1}.</span>
+                            <span style={{ flex: 1, fontSize: 13, lineHeight: 1.6 }}>{title}</span>
+                            {selectedTitleIndex === i && <CheckOutlined style={{ color: '#1890ff', fontSize: 12, flexShrink: 0 }} />}
+                          </div>
+                        ))
+                      ) : (
+                        <div style={{ fontSize: 12, color: '#ccc', marginTop: 4 }}>选择平台，生成 5 个爆款标题</div>
+                      )}
+                    </div>
+
+                    {/* 开场白优化 */}
+                    <div style={{ background: '#fff', borderRadius: 10, padding: '14px 18px', border: '1px solid #e8e8e8' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                        <span style={{ fontWeight: 600, fontSize: 13 }}>
+                          <ThunderboltOutlined style={{ color: '#722ed1', marginRight: 7 }} />开场白优化
+                          {selectedOpeningIndex !== null && (
+                            <span style={{ fontSize: 11, color: '#722ed1', fontWeight: 400, marginLeft: 8 }}>已选「{aiOpenings[selectedOpeningIndex]?.style}」</span>
+                          )}
+                        </span>
+                        <Button size="small" type="primary" ghost icon={<ThunderboltOutlined />} loading={generatingOpening}
+                          onClick={() => { setSelectedOpeningIndex(null); handleOptimizeOpening(); }}>
+                          {aiOpenings.length ? '重新优化' : '优化开场'}
+                        </Button>
+                      </div>
+                      {generatingOpening ? (
+                        <div style={{ textAlign: 'center', padding: '12px 0', color: '#aaa', fontSize: 12 }}><Spin size="small" style={{ marginRight: 6 }} />优化中...</div>
+                      ) : aiOpenings.length > 0 ? (
+                        aiOpenings.map((o, i) => (
+                          <div
+                            key={i}
+                            onClick={() => setSelectedOpeningIndex(selectedOpeningIndex === i ? null : i)}
+                            style={{
+                              padding: '10px 12px', borderRadius: 8, marginBottom: 8, cursor: 'pointer', transition: 'all 0.15s',
+                              background: selectedOpeningIndex === i ? '#f9f0ff' : '#f7f8fa',
+                              border: `1px solid ${selectedOpeningIndex === i ? '#d3adf7' : '#f0f0f0'}`,
+                            }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                              <Tag color={selectedOpeningIndex === i ? 'purple' : 'default'} style={{ margin: 0 }}>{o.style}</Tag>
+                              {selectedOpeningIndex === i && <CheckOutlined style={{ color: '#722ed1', fontSize: 12 }} />}
+                            </div>
+                            <div style={{ fontSize: 13, color: '#333', lineHeight: 1.8 }}>{o.content}</div>
+                          </div>
+                        ))
+                      ) : (
+                        <div style={{ fontSize: 12, color: '#ccc', marginTop: 4 }}>基于文稿，生成 3 种风格的开场白方案</div>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Step 3：最终定稿 */}
+            {currentStep === 3 && (
+              <div style={{ maxWidth: 600, margin: '0 auto' }}>
+                <div style={{ marginBottom: 16, fontSize: 13, color: '#888', lineHeight: 1.8 }}>
+                  在此编辑并保存最终版本文案。{aiScript && '上一步已生成文稿，可点击下方按钮快速填入。'}
+                </div>
+                {aiScript && (
+                  <Button
+                    block
+                    icon={<FileTextOutlined />}
+                    style={{ marginBottom: 16 }}
+                    onClick={() => { form.setFieldValue('finalDraft', aiScript); message.success('已填入'); }}
+                  >
+                    将 AI 生成文稿填入定稿
+                  </Button>
+                )}
+                <Form.Item name="finalDraft" style={{ marginBottom: 0 }}>
+                  <TextArea
+                    placeholder="在这里记录最终定稿的文案或脚本..."
+                    rows={18}
+                    style={{ fontSize: 13, lineHeight: 1.9, fontFamily: 'inherit', resize: 'none' }}
+                  />
+                </Form.Item>
+              </div>
+            )}
+          </div>
+
+          {/* ── 底部导航栏 ── */}
+          <div style={{
+            padding: '14px 32px',
+            borderTop: '1px solid #f0f0f0',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            background: '#fff',
+            flexShrink: 0,
+          }}>
+            <Button
+              icon={currentStep > 0 ? <ArrowLeftOutlined /> : undefined}
+              onClick={currentStep === 0 ? handleClose : handleBack}
+            >
+              {currentStep === 0 ? '取消' : '上一步'}
+            </Button>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span style={{ fontSize: 12, color: '#bbb' }}>
+                {currentStep + 1} / {WIZARD_STEPS.length}
+              </span>
+              {currentStep < 3 ? (
+                <Button type="primary" onClick={handleNext}>
+                  下一步
+                </Button>
+              ) : (
+                <Button
+                  type="primary"
+                  icon={<SaveOutlined />}
+                  loading={savingDraft}
+                  onClick={handleSaveDraft}
+                >
+                  保存定稿
+                </Button>
+              )}
             </div>
           </div>
+
         </Form>
       </Drawer>
 
       <style>{`
         .completed-row td { background: #f6ffed !important; }
         .completed-row:hover td { background: #edfde4 !important; }
-        .draft-full-height { height: 100%; display: flex !important; flex-direction: column; }
-        .draft-full-height .ant-form-item-row { flex: 1; height: 100%; }
-        .draft-full-height .ant-form-item-control { flex: 1; }
-        .draft-full-height .ant-form-item-control-input { flex: 1; height: 100% !important; min-height: 0 !important; align-items: stretch; }
-        .draft-full-height .ant-form-item-control-input-content { height: 100%; display: flex; flex-direction: column; }
-        .draft-full-height textarea { flex: 1 !important; height: 100% !important; min-height: 0 !important; }
       `}</style>
     </div>
   );

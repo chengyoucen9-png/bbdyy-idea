@@ -14,8 +14,8 @@ import VideosPage from './pages/Videos';
 import HomePage from './pages/Home';
 import AiConfigPage from './pages/AiConfig';
 import UsersPage from './pages/Users';
-import CrawlerPage from './pages/Crawler';
 import CrawlerSyncPage from './pages/CrawlerSync';
+import TalentsPage from './pages/Talents';
 
 const queryClient = new QueryClient();
 
@@ -51,16 +51,14 @@ function App() {
                       <Routes>
                         <Route path="/" element={<HomePage />} />
                         <Route path="/materials/bbdyy" element={<MaterialsPage />} />
-                        <Route path="/materials/talent" element={<MaterialsPage />} />
+                        <Route path="/materials/talent" element={<TalentsPage />} />
                         <Route path="/topics" element={<TopicsPage />} />
                         <Route path="/videos" element={<VideosPage />} />
                         <Route path="/ai-config" element={<AiConfigPage />} />
-                        <Route path="/crawler/tasks" element={<CrawlerPage />} />
-                        <Route path="/crawler/results" element={<CrawlerPage />} />
                         <Route path="/crawler/sync" element={<CrawlerSyncPage />} />
                         <Route path="/users" element={<UsersPage />} />
                         <Route path="/materials" element={<Navigate to="/materials/bbdyy" replace />} />
-                        <Route path="/crawler" element={<Navigate to="/crawler/tasks" replace />} />
+                        <Route path="/crawler" element={<Navigate to="/crawler/sync" replace />} />
                       </Routes>
                     </DashboardLayout>
                   </PrivateRoute>

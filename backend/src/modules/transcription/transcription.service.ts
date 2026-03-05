@@ -1,5 +1,4 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
 import {
   TranscriptionRequest,
@@ -16,7 +15,6 @@ export class TranscriptionService {
   constructor(
     private readonly aliyunSTT: AliyunSTTProvider,
     private readonly aiModelSTT: AIModelSTTProvider,
-    private configService: ConfigService,
   ) {}
 
   /**
@@ -34,7 +32,7 @@ export class TranscriptionService {
 
     try {
       // 策略1：优先使用阿里云STT（专业、准确、便宜）
-      if (false) {
+      if (await this.aliyunSTT.isAvailable()) {
         this.logger.log('使用阿里云STT服务');
         result = await this.aliyunSTT.transcribe(request);
       } else {
@@ -45,11 +43,15 @@ export class TranscriptionService {
 
       try {
         // 策略2：降级到AI模型（兜底方案）
+        const isAiModelAvailable = await this.aiModelSTT.isAvailable();
+        if (!isAiModelAvailable) {
+          throw new Error('AI模型转写服务不可用，请配置DASHSCOPE_API_KEY');
+        }
         this.logger.log('使用AI模型进行转写');
         result = await this.aiModelSTT.transcribe(request);
       } catch (error2) {
         this.logger.error('所有转写服务都失败', error2.stack);
-        throw new Error('转写服务不可用，请稍后重试');
+        throw new Error(error2.message || '转写服务不可用，请稍后重试');
       }
     }
 

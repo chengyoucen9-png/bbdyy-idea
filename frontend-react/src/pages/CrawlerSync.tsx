@@ -1,39 +1,67 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import axios from 'axios';
 import { Button, Card, Table, Input, message, Space, Tag, Popconfirm, Modal } from 'antd';
-import { SearchOutlined, ReloadOutlined, DeleteOutlined, PlayCircleOutlined } from '@ant-design/icons';
+import {
+  SearchOutlined, ReloadOutlined, DeleteOutlined, PlayCircleOutlined,
+  SyncOutlined, CheckCircleOutlined, CloseCircleOutlined, ClockCircleOutlined, MinusCircleOutlined, DownloadOutlined,
+} from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { materialsAPI } from '../api/client';
 import api from '../api/client';
 
+type DownloadStatus = 'pending' | 'downloading' | 'completed' | 'failed' | 'no_url';
+
+const DOWNLOAD_STATUS_CONFIG: Record<DownloadStatus, { label: string; color: string; icon: React.ReactNode }> = {
+  pending:     { label: '待下载', color: 'orange',  icon: <ClockCircleOutlined /> },
+  downloading: { label: '下载中', color: 'blue',    icon: <SyncOutlined spin /> },
+  completed:   { label: '已完成', color: 'success', icon: <CheckCircleOutlined /> },
+  failed:      { label: '失败',   color: 'error',   icon: <CloseCircleOutlined /> },
+  no_url:      { label: '无链接', color: 'default', icon: <MinusCircleOutlined /> },
+};
+
+// 直接用原始 axios，避免拦截器丢失 total 等分页字段
+const fetchImportedData = async (params: any): Promise<{ data: any[]; total: number; page: number; limit: number }> => {
+  const token = localStorage.getItem('access_token');
+  const response = await axios.get('/api/crawler/sync/imported-data', {
+    params,
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    timeout: 120000,
+  });
+  // 后端全局包装：{ code, message, data: { data: [...], total } }
+  return response.data.data ?? response.data;
+};
+
 const syncAPI = {
-  getImportedData: async (params: any) => {
-    const response = await api.get('/crawler/sync/imported-data', { params });
-    return response; // api实例已经处理了响应数据
-  },
-  importData: (data: any) => api.post('/crawler/sync/import-data', data),
   deleteMaterial: (id: number) => materialsAPI.delete(id),
 };
 
 export default function CrawlerSyncPage() {
   const queryClient = useQueryClient();
   const [searchText, setSearchText] = useState('');
-  const [pagination, setPagination] = useState({ current: 1, pageSize: 10 });
+  const [pagination, setPagination] = useState({ current: 1, pageSize: 100 });
   const [videoModalVisible, setVideoModalVisible] = useState(false);
   const [currentVideoUrl, setCurrentVideoUrl] = useState('');
+  const [downloadingIds, setDownloadingIds] = useState<Set<number>>(new Set());
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['imported-data', pagination.current, pagination.pageSize, searchText],
-    queryFn: async () => {
-      const result = await syncAPI.getImportedData({
-        page: pagination.current,
-        limit: pagination.pageSize,
-        search: searchText,
-      });
-      // 调试：打印数据结构
-      console.log('Data received from API:', result);
-      return result;
-    },
+    queryFn: () => fetchImportedData({
+      page: pagination.current,
+      limit: pagination.pageSize,
+      search: searchText,
+    }),
   });
+
+  // 有 pending/downloading 时每 5 秒自动刷新
+  const rows: any[] = Array.isArray(data?.data) ? data.data : [];
+  const hasActiveDownloads = rows.some(
+    (item: any) => item.downloadStatus === 'pending' || item.downloadStatus === 'downloading'
+  );
+  useEffect(() => {
+    if (!hasActiveDownloads) return;
+    const timer = setInterval(() => refetch(), 5000);
+    return () => clearInterval(timer);
+  }, [hasActiveDownloads, refetch]);
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => syncAPI.deleteMaterial(id),
@@ -46,21 +74,29 @@ export default function CrawlerSyncPage() {
     },
   });
 
-  const handleSearch = () => {
-    setPagination({ ...pagination, current: 1 });
-    refetch();
-  };
-
-  const handleTableChange = (newPagination: any) => {
-    setPagination({
-      current: newPagination.current,
-      pageSize: newPagination.pageSize,
-    });
-  };
-
-  const handleDelete = (id: number) => {
-    deleteMutation.mutate(id);
-  };
+  const retryDownloadMutation = useMutation({
+    mutationFn: (id: number) => {
+      setDownloadingIds(prev => new Set(prev).add(id));
+      return api.post(`/crawler/sync/retry-download/${id}`);
+    },
+    onSuccess: (_, id) => {
+      setDownloadingIds(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(id);
+        return newSet;
+      });
+      message.success('已开始下载');
+      queryClient.invalidateQueries({ queryKey: ['imported-data'] });
+    },
+    onError: (err: any, id) => {
+      setDownloadingIds(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(id);
+        return newSet;
+      });
+      message.error(err.response?.data?.message || '下载失败');
+    },
+  });
 
   const clearAllMutation = useMutation({
     mutationFn: () => api.delete('/crawler/sync/clear-data'),
@@ -73,6 +109,15 @@ export default function CrawlerSyncPage() {
     },
   });
 
+  const handleSearch = () => {
+    setPagination({ ...pagination, current: 1 });
+    refetch();
+  };
+
+  const handleTableChange = (newPagination: any) => {
+    setPagination({ current: newPagination.current, pageSize: newPagination.pageSize });
+  };
+
   const handleClearAll = () => {
     if (window.confirm('确定要清空所有数据吗？此操作不可恢复！')) {
       clearAllMutation.mutate();
@@ -84,16 +129,10 @@ export default function CrawlerSyncPage() {
     setVideoModalVisible(true);
   };
 
-  const handleVideoModalClose = () => {
-    setVideoModalVisible(false);
-    setCurrentVideoUrl('');
-  };
-
   const formatTimestamp = (timestamp: number | string) => {
     if (!timestamp) return '-';
     const ts = typeof timestamp === 'string' ? parseInt(timestamp, 10) : timestamp;
-    const date = new Date(ts);
-    return date.toLocaleString('zh-CN');
+    return new Date(ts).toLocaleString('zh-CN');
   };
 
   const formatNumber = (num: number) => {
@@ -101,12 +140,14 @@ export default function CrawlerSyncPage() {
     return num.toLocaleString();
   };
 
+  const total = data?.total ?? 0;
+
   const columns = [
     {
-      title: 'ID',
-      dataIndex: 'id',
-      key: 'id',
+      title: '序号',
+      key: 'index',
       width: 50,
+      render: (_: any, __: any, index: number) => (rows.length - index),
     },
     {
       title: '详情',
@@ -124,16 +165,30 @@ export default function CrawlerSyncPage() {
       render: (text: string) => text || '-',
     },
     {
+      title: '下载状态',
+      dataIndex: 'downloadStatus',
+      key: 'downloadStatus',
+      width: 100,
+      render: (status: DownloadStatus) => {
+        const cfg = DOWNLOAD_STATUS_CONFIG[status] ?? DOWNLOAD_STATUS_CONFIG.no_url;
+        return (
+          <Tag icon={cfg.icon} color={cfg.color}>
+            {cfg.label}
+          </Tag>
+        );
+      },
+    },
+    {
       title: '附件',
       dataIndex: 'ossUrl',
       key: 'ossUrl',
       width: 100,
-      render: (text: string, record: any) => {
+      render: (text: string) => {
         if (!text) return '-';
         return (
-          <Button 
-            type="link" 
-            icon={<PlayCircleOutlined />} 
+          <Button
+            type="link"
+            icon={<PlayCircleOutlined />}
             size="small"
             onClick={() => handleVideoPreview(text)}
             style={{ padding: 0 }}
@@ -206,13 +261,24 @@ export default function CrawlerSyncPage() {
     {
       title: '操作',
       key: 'action',
-      width: 70,
+      width: 160,
       fixed: 'right' as const,
       render: (_: any, record: any) => (
         <Space>
+          {record.downloadStatus === 'failed' && (
+            <Button
+              type="link"
+              icon={<DownloadOutlined />}
+              size="small"
+              loading={downloadingIds.has(record.id)}
+              onClick={() => retryDownloadMutation.mutate(record.id)}
+            >
+              下载
+            </Button>
+          )}
           <Popconfirm
             title="确定要删除这条数据吗？"
-            onConfirm={() => handleDelete(record.id)}
+            onConfirm={() => deleteMutation.mutate(record.id)}
             okText="确定"
             cancelText="取消"
           >
@@ -244,31 +310,34 @@ export default function CrawlerSyncPage() {
             <Button icon={<ReloadOutlined />} onClick={() => refetch()}>
               刷新
             </Button>
-            <Button type="danger" onClick={handleClearAll}>
+            <Button danger onClick={handleClearAll}>
               清空数据
             </Button>
           </Space>
           <Space>
-            <Tag color="blue">共 {data?.total || 0} 条数据</Tag>
+            {hasActiveDownloads && (
+              <Tag icon={<SyncOutlined spin />} color="blue">视频下载中，自动刷新</Tag>
+            )}
+            <Tag color="blue">共 {total} 条数据</Tag>
           </Space>
         </div>
 
         <Table
           columns={columns}
-          dataSource={Array.isArray(data?.data) ? data.data : []}
+          dataSource={rows}
           rowKey="id"
           loading={isLoading}
           pagination={{
             current: pagination.current,
             pageSize: pagination.pageSize,
-            total: data?.total || 0,
+            total,
             showSizeChanger: true,
             showQuickJumper: true,
-            showTotal: (total) => `共 ${total} 条数据`,
+            showTotal: (t) => `共 ${t} 条数据`,
             pageSizeOptions: ['10', '20', '50', '100'],
           }}
           onChange={handleTableChange}
-          scroll={{ x: 1200 }}
+          scroll={{ x: 'max-content' }}
           size="small"
         />
       </Card>
@@ -276,15 +345,15 @@ export default function CrawlerSyncPage() {
       <Modal
         title="视频预览"
         open={videoModalVisible}
-        onCancel={handleVideoModalClose}
+        onCancel={() => { setVideoModalVisible(false); setCurrentVideoUrl(''); }}
         footer={null}
         width={800}
         centered
       >
-        <video 
-          src={currentVideoUrl} 
-          controls 
-          autoPlay 
+        <video
+          src={currentVideoUrl}
+          controls
+          autoPlay
           style={{ width: '100%', maxHeight: '70vh' }}
         />
       </Modal>

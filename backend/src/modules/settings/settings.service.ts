@@ -26,6 +26,7 @@ export class SettingsService {
     'DASHSCOPE_API_KEY',
     'DEEPSEEK_API_KEY',
     'KIMI_API_KEY',
+    'FEISHU_APP_SECRET',
   ]);
 
   private readonly groupDef: { group: string; label: string; keys: string[] }[] = [
@@ -77,6 +78,11 @@ export class SettingsService {
         'AI_VISION_ENDPOINT',
         'AI_TRANSCRIPTION_MODEL',
       ],
+    },
+    {
+      group: 'feishu',
+      label: '飞书配置',
+      keys: ['FEISHU_APP_ID', 'FEISHU_APP_SECRET'],
     },
   ];
 

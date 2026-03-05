@@ -12,16 +12,31 @@ export class MaterialsService {
   ) {}
 
   async findAll(userId: number, query: QueryMaterialDto) {
-    const { search, page = 1, limit = 20 } = query;
+    const { search, page = 1, limit = 20, type } = query;
     const queryBuilder = this.materialsRepository
-      .createQueryBuilder('material')
-      .where('material.userId = :userId', { userId });
+      .createQueryBuilder('material');
+
+    // 过滤素材类型
+    if (type === 'bbdyy') {
+      // bbdyy素材：作者为bbdyy
+      queryBuilder.where('material.authorName = \'bbdyy\'');
+    } else if (type === 'talent') {
+      // 达人素材：有作者信息且不为bbdyy
+      queryBuilder.where('(material.authorName IS NOT NULL AND material.authorName != \'\')');
+    }
 
     if (search) {
-      queryBuilder.andWhere(
-        '(material.name LIKE :search OR material.scene LIKE :search OR material.note LIKE :search)',
-        { search: `%${search}%` },
-      );
+      if (type) {
+        queryBuilder.andWhere(
+          '(material.name LIKE :search OR material.scene LIKE :search OR material.note LIKE :search)',
+          { search: `%${search}%` },
+        );
+      } else {
+        queryBuilder.where(
+          '(material.name LIKE :search OR material.scene LIKE :search OR material.note LIKE :search)',
+          { search: `%${search}%` },
+        );
+      }
     }
 
     const [items, total] = await queryBuilder
@@ -35,7 +50,7 @@ export class MaterialsService {
 
   async findOne(userId: number, id: number) {
     const material = await this.materialsRepository.findOne({
-      where: { id, userId },
+      where: { id },
     });
     if (!material) throw new NotFoundException('素材不存在');
     return material;
@@ -53,7 +68,7 @@ export class MaterialsService {
   }
 
   async findDuplicate(userId: number, filename: string, fileSize: number) {
-    return this.materialsRepository.findOne({ where: { userId, name: filename, fileSize } });
+    return this.materialsRepository.findOne({ where: { name: filename, fileSize } });
   }
 
   async remove(userId: number, id: number) {
@@ -69,11 +84,22 @@ export class MaterialsService {
     return this.materialsRepository.save(material);
   }
 
-  async getStatistics(userId: number) {
+  async getStatistics(userId: number, type?: string) {
+    let baseQuery = this.materialsRepository.createQueryBuilder('material');
+    
+    // 过滤素材类型
+    if (type === 'bbdyy') {
+      // bbdyy素材：作者为bbdyy
+      baseQuery = baseQuery.where('material.authorName = \'bbdyy\'');
+    } else if (type === 'talent') {
+      // 达人素材：有作者信息且不为bbdyy
+      baseQuery = baseQuery.where('(material.authorName IS NOT NULL AND material.authorName != \'\')');
+    }
+    
     const [total, imageCount, videoCount] = await Promise.all([
-      this.materialsRepository.count({ where: { userId } }),
-      this.materialsRepository.count({ where: { userId, fileType: 'image' as any } }),
-      this.materialsRepository.count({ where: { userId, fileType: 'video' as any } }),
+      baseQuery.getCount(),
+      baseQuery.clone().andWhere('material.fileType = :fileType', { fileType: FileType.IMAGE }).getCount(),
+      baseQuery.clone().andWhere('material.fileType = :fileType', { fileType: FileType.VIDEO }).getCount(),
     ]);
     return { total, imageCount, videoCount };
   }
@@ -85,7 +111,7 @@ export class MaterialsService {
   async searchByKeywords(userId: number, keywords: string[]): Promise<Material[]> {
     if (!keywords || keywords.length === 0) return [];
 
-    const all = await this.materialsRepository.find({ where: { userId } });
+    const all = await this.materialsRepository.find();
 
     // 对每个素材打分：匹配到几个关键词
     const scored = all.map((mat) => {

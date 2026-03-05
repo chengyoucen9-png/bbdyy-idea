@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Delete, Body, UploadedFile, UseInterceptors, Query } from '@nestjs/common';
+import { Controller, Post, Get, Delete, Body, UploadedFile, UseInterceptors, Query, Param } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { CrawlerSyncService } from './crawler-sync.service';
 
@@ -47,6 +47,11 @@ export class CrawlerSyncController {
   @Get('imported-data')
   async getImportedData(@Query() query: any) {
     return this.crawlerSyncService.getImportedData(query);
+  }
+
+  @Post('retry-download/:id')
+  async retryDownload(@Param('id') id: string) {
+    return this.crawlerSyncService.retryDownload(Number(id));
   }
 
   @Delete('clear-data')

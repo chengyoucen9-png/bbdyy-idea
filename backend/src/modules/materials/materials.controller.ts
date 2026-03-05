@@ -11,6 +11,7 @@ import {
   Request,
   UseInterceptors,
   UploadedFile,
+  InternalServerErrorException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
@@ -39,8 +40,8 @@ export class MaterialsController {
 
   @Get('stats/summary')
   @ApiOperation({ summary: '获取素材统计' })
-  async getStats(@Request() req) {
-    return this.materialsService.getStatistics(req.user.id);
+  async getStats(@Request() req, @Query('type') type?: string) {
+    return this.materialsService.getStatistics(req.user.id, type);
   }
 
   /**
@@ -181,10 +182,11 @@ export class MaterialsController {
       name: filename,
       scene,
       tags,
-      thumbnail: fileUrl,
+      ossUrl: fileUrl,
       fileType: fileType as any,
       fileSize: file.size,
       note: transcriptionText || dto.note || '',
+      authorName: dto.authorName || null,
     });
   }
 
@@ -207,14 +209,19 @@ export class MaterialsController {
   async transcribeMaterial(@Request() req, @Param('id') id: number) {
     const material = await this.materialsService.findOne(req.user.id, id);
     const fileUrl = (material as any).ossUrl || material.thumbnail;
-    if (!fileUrl) throw new Error('素材没有关联文件');
+    if (!fileUrl) throw new InternalServerErrorException('素材没有关联文件');
 
-    const result = await this.transcriptionService.transcribe({
-      fileUrl,
-      fileType: material.fileType as 'audio' | 'video',
-      language: 'zh-CN',
-      enablePunctuation: true,
-    });
+    let result: any;
+    try {
+      result = await this.transcriptionService.transcribe({
+        fileUrl,
+        fileType: material.fileType as 'audio' | 'video',
+        language: 'zh-CN',
+        enablePunctuation: true,
+      });
+    } catch (err) {
+      throw new InternalServerErrorException(err.message || '转写失败');
+    }
 
     let tags: string[] = [], scene = '';
     try {

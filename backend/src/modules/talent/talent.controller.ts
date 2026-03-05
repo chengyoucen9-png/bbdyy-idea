@@ -16,8 +16,6 @@ import { PlatformType, TalentMaterialType } from './talent.entity';
 
 @ApiTags('达人')
 @Controller('talents')
-@UseGuards(JwtAuthGuard)
-@ApiBearerAuth('JWT-auth')
 export class TalentController {
   constructor(private readonly talentService: TalentService) {}
 
@@ -74,15 +72,27 @@ export class TalentController {
     return this.talentService.update(id, data);
   }
 
-  @Delete(':id')
-  @ApiOperation({ summary: '删除达人' })
-  async delete(@Param('id') id: number) {
-    return this.talentService.delete(id);
+  @Post('clear-materials')
+  @ApiOperation({ summary: '清空所有达人素材' })
+  async clearAllMaterials() {
+    return this.talentService.clearAllMaterials();
   }
 
   @Delete('materials/:id')
   @ApiOperation({ summary: '删除达人素材' })
   async deleteMaterial(@Param('id') id: number) {
     return this.talentService.deleteMaterial(id);
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: '删除达人' })
+  async delete(@Param('id') id: number) {
+    return this.talentService.delete(id);
+  }
+
+  @Post('materials/:id/transcribe')
+  @ApiOperation({ summary: '转写达人素材' })
+  async transcribeMaterial(@Param('id') id: number) {
+    return this.talentService.transcribeMaterial(id);
   }
 }

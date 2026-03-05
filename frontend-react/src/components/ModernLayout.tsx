@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Layout, Tabs, Avatar, Dropdown, Space } from 'antd';
 import { UserOutlined, SettingOutlined, LogoutOutlined } from '@ant-design/icons';
@@ -44,9 +43,13 @@ export default function ModernLayout({ children }: LayoutProps) {
   return (
     <Layout style={{ minHeight: '100vh', background: '#f5f7fa' }}>
       <Header style={{ background: '#fff', padding: '0 32px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <h2 style={{ margin: 0, fontSize: 20, fontWeight: 600 }}>短视频内容生产系统</h2>
-          <span style={{ fontSize: 12, color: '#999', background: '#f0f0f0', padding: '2px 8px', borderRadius: 4 }}>AI智能版 v3.2 🚀</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <img src="/logo.svg" alt="星枢" style={{ width: 36, height: 36, flexShrink: 0 }} />
+          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+            <span style={{ fontSize: 20, fontWeight: 700, lineHeight: 1.2, letterSpacing: 2, color: '#1a1a1a' }}>星枢</span>
+            <span style={{ fontSize: 11, color: '#aaa', lineHeight: 1.3, letterSpacing: 0.5 }}>以星为引，枢动内容</span>
+          </div>
+          <span style={{ fontSize: 11, color: '#999', background: '#f0f0f0', padding: '2px 8px', borderRadius: 4, alignSelf: 'flex-start', marginTop: 2 }}>v1.2.5</span>
         </div>
         <Dropdown menu={{ items: menuItems }} placement="bottomRight">
           <Space style={{ cursor: 'pointer' }}>

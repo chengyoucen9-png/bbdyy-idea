@@ -12,7 +12,7 @@ import {
   ThunderboltOutlined,
 } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
-import { materialsAPI } from '../api/client';
+import { materialsAPI, talentAPI } from '../api/client';
 
 const { Title, Text } = Typography;
 const { Search } = Input;
@@ -20,7 +20,33 @@ const { Search } = Input;
 const fetchMaterials = async (keyword: string) => {
   const params: any = { page: 1, limit: 50 };
   if (keyword) params.search = keyword;
-  return materialsAPI.getList(params);
+  
+  // 同时获取bbdyy素材和达人素材
+  const [bbdyyMaterials, talentMaterials] = await Promise.all([
+    materialsAPI.getList({ ...params, type: 'bbdyy' }),
+    talentAPI.getMaterials({ keywords: keyword })
+  ]);
+  
+  // 合并素材列表
+  const bbdyyItems = Array.isArray((bbdyyMaterials as any)?.items) ? (bbdyyMaterials as any).items : [];
+  const talentItems = Array.isArray((talentMaterials as any)?.materials) ? (talentMaterials as any).materials : [];
+  
+  // 统一素材结构，确保封面图片属性一致
+  const unifiedItems = [
+    ...bbdyyItems.map((item: any) => ({
+      ...item,
+      fileType: item.fileType || 'video',
+      thumbnail: item.thumbnail || item.coverUrl || item.ossUrl
+    })),
+    ...talentItems.map((item: any) => ({
+      ...item,
+      name: item.title || item.name,
+      fileType: item.type || item.fileType || 'video',
+      thumbnail: item.thumbnail || item.coverUrl || item.ossUrl
+    }))
+  ];
+  
+  return { items: unifiedItems, total: unifiedItems.length };
 };
 
 const getFileIcon = (fileType: string) => {
@@ -41,9 +67,10 @@ const getFileTypeColor = (fileType: string) => {
   }
 };
 
-const formatDate = (dateStr: string) => {
+const formatDate = (dateStr: string | number) => {
   if (!dateStr) return '';
   const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return '';
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
@@ -174,13 +201,13 @@ export default function HomePage() {
                       getFileIcon(item.fileType)
                     )}
                     {/* 时长角标 */}
-                    {item.duration && (
+                    {item.duration && !isNaN(Number(item.duration)) && (
                       <div style={{
                         position: 'absolute', bottom: 6, right: 8,
                         background: 'rgba(0,0,0,0.6)', color: '#fff',
                         fontSize: 11, padding: '1px 6px', borderRadius: 4,
                       }}>
-                        {Math.floor(item.duration / 60)}:{String(Math.round(item.duration % 60)).padStart(2, '0')}
+                        {Math.floor(Number(item.duration) / 60)}:{String(Math.round(Number(item.duration) % 60)).padStart(2, '0')}
                       </div>
                     )}
                   </div>
@@ -198,10 +225,10 @@ export default function HomePage() {
 
                     {/* 类型 + 场景标签 */}
                     <div style={{ marginBottom: 6, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                      {item.tags?.filter(Boolean).slice(0, 3).map((tag: string) => (
+                      {Array.isArray(item.tags) && item.tags.filter(Boolean).slice(0, 3).map((tag: string) => (
                         <Tag key={tag} color="purple" style={{ margin: 0, maxWidth: 72, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tag}</Tag>
                       ))}
-                      {(item.tags?.filter(Boolean).length || 0) > 3 && (
+                      {Array.isArray(item.tags) && (item.tags.filter(Boolean).length || 0) > 3 && (
                         <Tag style={{ margin: 0 }}>+{item.tags.filter(Boolean).length - 3}</Tag>
                       )}
                     </div>
@@ -278,10 +305,10 @@ export default function HomePage() {
               background: '#000',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>
-              {previewMaterial.fileType === 'video' && previewMaterial.thumbnail && (
+              {previewMaterial.fileType === 'video' && (previewMaterial.ossUrl || previewMaterial.thumbnail) && (
                 <video
                   key={previewMaterial.id}
-                  src={previewMaterial.thumbnail}
+                  src={previewMaterial.ossUrl || previewMaterial.thumbnail}
                   controls
                   autoPlay
                   style={{ width: '100%', maxHeight: 320, objectFit: 'contain', display: 'block' }}
@@ -294,10 +321,10 @@ export default function HomePage() {
                   style={{ width: '100%', maxHeight: 320, objectFit: 'contain', display: 'block' }}
                 />
               )}
-              {previewMaterial.fileType === 'audio' && previewMaterial.thumbnail && (
+              {previewMaterial.fileType === 'audio' && (previewMaterial.ossUrl || previewMaterial.thumbnail) && (
                 <div style={{ padding: '28px 24px', textAlign: 'center', background: '#111', width: '100%' }}>
                   <div style={{ fontSize: 48, marginBottom: 16 }}>🎵</div>
-                  <audio src={previewMaterial.thumbnail} controls style={{ width: '100%' }} />
+                  <audio src={previewMaterial.ossUrl || previewMaterial.thumbnail} controls style={{ width: '100%' }} />
                 </div>
               )}
             </div>
@@ -310,7 +337,7 @@ export default function HomePage() {
                 <div style={{ fontSize: 11, color: '#aaa', fontWeight: 600, letterSpacing: 0.8, marginBottom: 8 }}>标签</div>
                 <Space wrap size={[6, 6]}>
                   <Tag color={getFileTypeColor(previewMaterial.fileType)} style={{ margin: 0 }}>{previewMaterial.fileType}</Tag>
-                  {previewMaterial.tags?.filter(Boolean).map((tag: string) => (
+                  {Array.isArray(previewMaterial.tags) && previewMaterial.tags.filter(Boolean).map((tag: string) => (
                     <Tag key={tag} color="purple" style={{ margin: 0 }}>{tag}</Tag>
                   ))}
                 </Space>

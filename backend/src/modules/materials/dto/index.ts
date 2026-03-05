@@ -37,6 +37,10 @@ export class CreateMaterialDto {
   @IsNumber()
   @IsOptional()
   fileSize?: number;
+
+  @IsString()
+  @IsOptional()
+  authorName?: string;
 }
 
 export class UpdateMaterialDto {
@@ -75,4 +79,8 @@ export class QueryMaterialDto {
   @IsNumber()
   @IsOptional()
   limit?: number;
+
+  @IsString()
+  @IsOptional()
+  type?: string;
 }

@@ -21,14 +21,12 @@ import {
   PlusOutlined,
   EditOutlined,
   DeleteOutlined,
-  LoginOutlined,
   UserOutlined,
   ReloadOutlined,
   CrownOutlined,
 } from '@ant-design/icons';
 import { usersAPI } from '../api/client';
 import { useAuthStore } from '../store/auth';
-import { useNavigate } from 'react-router-dom';
 
 const { Text } = Typography;
 
@@ -49,11 +47,9 @@ export default function UsersPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
-  const [loginAsLoading, setLoginAsLoading] = useState<number | null>(null);
   const [createForm] = Form.useForm();
   const [editForm] = Form.useForm();
-  const { login: storeLogin, user: currentUser } = useAuthStore();
-  const navigate = useNavigate();
+  const { user: currentUser } = useAuthStore();
 
   const load = async () => {
     setLoading(true);
@@ -129,24 +125,6 @@ export default function UsersPage() {
     }
   };
 
-  // ── 一键登录 ────────────────────────────────────────────────────────────────
-  const handleLoginAs = async (u: User) => {
-    setLoginAsLoading(u.id);
-    try {
-      const res: any = await usersAPI.loginAs(u.id);
-      const token = res.access_token || res.data?.access_token;
-      const userInfo = res.user || res.data?.user;
-      if (!token) throw new Error('未获取到 token');
-      storeLogin(token, userInfo);
-      message.success(`已切换为用户「${u.nickname || u.username}」`);
-      navigate('/');
-    } catch {
-      message.error('登录失败');
-    } finally {
-      setLoginAsLoading(null);
-    }
-  };
-
   // ── 列定义 ──────────────────────────────────────────────────────────────────
   const columns = [
     {
@@ -215,18 +193,6 @@ export default function UsersPage() {
       width: 220,
       render: (_: any, u: User) => (
         <Space size={4}>
-          <Tooltip title="一键登录为该用户">
-            <Button
-              size="small"
-              type="primary"
-              icon={<LoginOutlined />}
-              loading={loginAsLoading === u.id}
-              disabled={u.id === currentUser?.id}
-              onClick={() => handleLoginAs(u)}
-            >
-              登录
-            </Button>
-          </Tooltip>
           <Tooltip title="编辑">
             <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(u)} />
           </Tooltip>

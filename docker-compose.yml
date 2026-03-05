@@ -33,6 +33,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    image: video-production-system_api:latest
     container_name: video-api
     restart: always
     ports:
@@ -68,10 +69,11 @@ services:
     build:
       context: ./frontend-react
       dockerfile: Dockerfile
+    image: video-production-system_frontend:latest
     container_name: video-frontend
     restart: always
     ports:
-      - "80:80"
+      - "8080:80"
     depends_on:
       - api
     volumes:

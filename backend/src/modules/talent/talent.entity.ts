@@ -83,10 +83,10 @@ export class TalentMaterial {
   title: string;
 
   @Column({ length: 500, nullable: true })
-  cover: string;
+  thumbnail: string;
 
   @Column({ length: 1000 })
-  url: string;
+  ossUrl: string;
 
   @Column({
     type: 'enum',
@@ -95,17 +95,20 @@ export class TalentMaterial {
   })
   type: TalentMaterialType;
 
-  @Column({ default: 0 })
-  likes: number;
+  @Column({ name: 'like_count', default: 0 })
+  likeCount: number;
 
-  @Column({ default: 0 })
-  comments: number;
+  @Column({ name: 'comment_count', default: 0 })
+  commentCount: number;
 
-  @Column({ default: 0 })
-  shares: number;
+  @Column({ name: 'share_count', default: 0 })
+  shareCount: number;
+
+  @Column({ name: 'collect_count', default: 0 })
+  collectCount: number;
 
   @Column({ type: 'text', nullable: true })
-  content: string;
+  description: string;
 
   @Column({ type: 'text', nullable: true })
   scene: string;
@@ -115,6 +118,21 @@ export class TalentMaterial {
 
   @Column({ name: 'crawl_time', type: 'datetime', nullable: true })
   crawlTime: Date;
+
+  @Column({ name: 'publish_time', type: 'datetime', nullable: true })
+  publishTime: Date;
+
+  @Column({ name: 'video_id', length: 200, nullable: true })
+  videoId: string;
+
+  @Column({ name: 'download_url', length: 1000, nullable: true })
+  downloadUrl: string;
+
+  @Column({ name: 'duration', length: 50, nullable: true })
+  duration: string;
+
+  @Column({ name: 'note', type: 'text', nullable: true })
+  note: string;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

@@ -3,7 +3,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
 export function setupSwagger(app: INestApplication) {
   const config = new DocumentBuilder()
-    .setTitle('短视频内容生产系统 API')
+    .setTitle('星枢 API')
     .setDescription('企业级短视频内容生产管理系统 RESTful API 文档')
     .setVersion('1.0.0')
     .setContact(
@@ -41,6 +41,6 @@ export function setupSwagger(app: INestApplication) {
       filter: true,
       showRequestDuration: true,
     },
-    customSiteTitle: '短视频内容生产系统 - API文档',
+    customSiteTitle: '星枢 - API文档',
   });
 }

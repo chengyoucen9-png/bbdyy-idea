@@ -11,15 +11,7 @@ export class CrawlerController {
     @Param('talentId') talentId: number,
     @Body() dto: CrawlDouyinTalentDto,
   ): Promise<CrawlDouyinTalentResponse> {
-    try {
-      console.log('收到爬虫任务请求', { talentId, dto });
-      const result = await this.crawlerService.crawlDouyinTalent(talentId, dto);
-      console.log('爬虫任务执行成功', { result });
-      return result;
-    } catch (error) {
-      console.error('爬虫任务执行失败', error);
-      throw error;
-    }
+    return this.crawlerService.crawlDouyinTalent(talentId, dto);
   }
 
   @Post('batch')

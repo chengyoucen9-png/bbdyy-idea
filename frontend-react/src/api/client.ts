@@ -44,7 +44,7 @@ export const materialsAPI = {
     return api.post('/materials/upload', formData);
   },
   transcribe: (id: number) => api.post(`/materials/${id}/transcribe`),
-  getStats: () => api.get('/materials/stats/summary'),
+  getStats: (params?: any) => api.get('/materials/stats/summary', { params }),
   // 按关键词/文本匹配素材（不需要 topicId）
   searchByKeywords: (text: string) => api.post('/materials/search-by-keywords', { text }),
 };
@@ -57,7 +57,8 @@ export const topicsAPI = {
   delete: (id: number) => api.delete(`/topics/${id}`),
   getStats: () => api.get('/topics/stats/summary'),
   searchMaterials: (id: number) => api.post(`/topics/${id}/search-materials`),
-  generateScript: (id: number, materialIds?: number[]) => api.post(`/topics/${id}/generate-script`, { materialIds }),
+  generateScript: (id: number, materialIds?: number[], customPrompt?: string) =>
+    api.post(`/topics/${id}/generate-script`, { materialIds, customPrompt }),
   generateTitles: (id: number, platform?: string) => api.post(`/topics/${id}/generate-titles`, { platform }),
   optimizeOpening: (id: number) => api.post(`/topics/${id}/optimize-opening`),
 };
@@ -89,6 +90,17 @@ export const usersAPI = {
 export const chatAPI = {
   send: (model: string, messages: { role: string; content: string }[]) =>
     api.post('/chat/send', { model, messages }),
+};
+
+export const talentAPI = {
+  getList: (params?: any) => api.get('/talents', { params }),
+  getMaterials: (params?: any) => api.get('/talents/materials', { params }),
+  getStats: () => api.get('/talents/stats'),
+  create: (data: any) => api.post('/talents', data),
+  update: (id: number, data: any) => api.put(`/talents/${id}`, data),
+  delete: (id: number) => api.delete(`/talents/${id}`),
+  deleteMaterial: (id: number) => api.delete(`/talents/materials/${id}`),
+  transcribeMaterial: (id: number) => api.post(`/materials/${id}/transcribe`),
 };
 
 export default api;
